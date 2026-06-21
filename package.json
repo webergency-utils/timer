@@ -27,7 +27,7 @@
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "build": "tsc && tsc -p tsconfig.esm.json && echo '{\"type\":\"module\"}' > dist/esm/package.json",
-    "version": "git pull && npm run build && npm publish && npm run commit && git push",
+    "version": "git pull && npm run build && npm publish --access public && npm run commit && git push",
     "commit": "node -e \"const version = require('./package.json').version.trim(); require('child_process').execSync('git add . && git commit -m \\\"Version ' + version + '\\\"');\""
   },
   "repository": {
