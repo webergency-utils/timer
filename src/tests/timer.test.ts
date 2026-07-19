@@ -2,6 +2,24 @@ import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import Timer from '../timer';
 import { getNextCronDate } from '../cron';
 
+let shouldMockRescheduleError = false;
+
+vi.mock('../cron', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../cron')>();
+    return {
+        ...actual,
+        getNextCronDate: (cron: string, fromDate?: Date, timeZone?: string) => {
+            if (cron === 'trigger-reschedule-error') {
+                if (shouldMockRescheduleError) {
+                    throw new Error('No matching execution date found within 5 years.');
+                }
+                return new Date( Date.now() + 1000 );
+            }
+            return actual.getNextCronDate(cron, fromDate, timeZone);
+        }
+    };
+});
+
 describe( 'Timer tests', () =>
 {
     beforeEach( () =>
@@ -1430,6 +1448,65 @@ describe( 'Timer tests', () =>
             vi.advanceTimersByTime( 500 );
             timer.destroy();
         });
+
+        test( 'should verify reschedule exception deletes task when next execution throws reschedule error', () =>
+        {
+            vi.setSystemTime( 0 );
+
+            const timer = new Timer();
+            const cb = vi.fn();
+
+            // Set succeeds initially with mock returning a deadline at 1000ms
+            shouldMockRescheduleError = false;
+            timer.set( 'tooFarTask', 'trigger-reschedule-error', cb );
+            expect( timer.has( 'tooFarTask' ) ).toBe( true );
+
+            // Enable reschedule error mock
+            shouldMockRescheduleError = true;
+
+            // Advance time to 1000ms to run the timer
+            vi.advanceTimersByTime( 1000 );
+
+            // Callback should be executed
+            expect( cb ).toHaveBeenCalledTimes( 1 );
+
+            // Reschedule should throw error internally, deleting the task from the index
+            expect( timer.has( 'tooFarTask' ) ).toBe( false );
+
+            timer.destroy();
+        });
+
+        test( 'should support DOW L qualifier (last day of week of month)', () =>
+        {
+            // Friday, June 26, 2026 is the last Friday of June 2026.
+            const baseDate = new Date( '2026-06-20T12:00:00Z' );
+            const next = getNextCronDate( '0 12 * * 5L', baseDate );
+
+            expect( next.getUTCDate() ).toBe( 26 );
+            expect( next.getUTCDay() ).toBe( 5 ); // Friday
+        });
+
+        test( 'should handle timezone-aware cron with non-matching starting month', () =>
+        {
+            // Start in June (month 6). Cron is only for December (month 12).
+            const baseDate = new Date( '2026-06-20T12:00:00Z' );
+            const next = getNextCronDate( '0 12 * 12 *', baseDate, 'America/New_York' );
+
+            expect( next.getUTCMonth() ).toBe( 11 ); // December (0-indexed)
+        });
+
+        test( 'should union-match DOM and DOW in timezone-aware cron when both restricted', () =>
+        {
+            // June 20, 2026 is Saturday (6).
+            // Cron runs on 15th OR any Friday (5).
+            // Next Friday is June 26. Next 15th is July 15.
+            // So next execution should be June 26.
+            const baseDate = new Date( '2026-06-20T12:00:00Z' );
+            const next = getNextCronDate( '0 12 15 * 5', baseDate, 'America/New_York' );
+
+            expect( next.getUTCDate() ).toBe( 26 );
+        });
     });
 });
+
 

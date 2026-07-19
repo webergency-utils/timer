@@ -1,21 +1,22 @@
 {
   "name": "@webergency-utils/timer",
-  "version": "0.0.1",
-  "description": "",
+  "version": "1.0.1",
+  "type": "module",
+  "description": "An efficient and robust task scheduling and cron timer library for Node.js supporting custom timezones and retries.",
   "author": "radixxko",
   "license": "MIT",
-  "main": "dist/timer.js",
-  "module": "dist/esm/timer.js",
+  "main": "dist/timer.cjs",
+  "module": "dist/timer.js",
   "types": "dist/timer.d.ts",
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/esm/timer.d.ts",
-        "default": "./dist/esm/timer.js"
-      },
-      "require": {
         "types": "./dist/timer.d.ts",
         "default": "./dist/timer.js"
+      },
+      "require": {
+        "types": "./dist/timer.d.cts",
+        "default": "./dist/timer.cjs"
       }
     }
   },
@@ -23,12 +24,12 @@
     "dist/**/*"
   ],
   "scripts": {
-    "clean": "rm -rf dist package-lock.json node_modules && npm i",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
-    "build": "tsc && tsc -p tsconfig.esm.json && echo '{\"type\":\"module\"}' > dist/esm/package.json",
-    "version": "git pull && npm run build && npm publish --access public && npm run commit && git push",
-    "commit": "node -e \"const version = require('./package.json').version.trim(); require('child_process').execSync('git add . && git commit -m \\\"Version ' + version + '\\\"');\""
+    "clean": "rm -rf ./dist/* node_modules package-lock.json && npm i",
+    "build": "npm run clean && tsup",
+    "commit": "node -e \"const version = require('./package.json').version.trim(); require('child_process').execSync('git add . && git commit -m \\\"Version ' + version + '\\\"');\"",
+    "version": "npm run build && npm publish --access public && npm run commit && git push"
   },
   "repository": {
     "type": "git",
@@ -40,6 +41,7 @@
   "devDependencies": {
     "@types/node": "^26.0.0",
     "@vitest/coverage-v8": "^4.1.9",
+    "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   }
