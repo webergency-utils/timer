@@ -5,6 +5,9 @@
   "description": "An efficient and robust task scheduling and cron timer library for Node.js supporting custom timezones and retries.",
   "author": "radixxko",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "dist/timer.cjs",
   "module": "dist/timer.js",
   "types": "dist/timer.d.ts",
@@ -25,8 +28,9 @@
   ],
   "scripts": {
     "test": "vitest run",
+    "fuzz": "jazzer fuzz_timer.cjs",
     "coverage": "vitest run --coverage",
-    "clean": "rm -rf ./dist/* node_modules package-lock.json && npm i",
+    "clean": "rm -rf ./dist/*",
     "build": "npm run clean && tsup",
     "commit": "node -e \"const version = require('./package.json').version.trim(); require('child_process').execSync('git add . && git commit -m \\\"Version ' + version + '\\\"');\"",
     "version": "npm run build && npm publish --access public && npm run commit && git push"
@@ -39,10 +43,11 @@
     "@webergency-utils/heap": "^0.0.1"
   },
   "devDependencies": {
+    "@jazzer.js/core": "^4.0.0",
     "@types/node": "^26.0.0",
     "@vitest/coverage-v8": "^4.1.9",
     "tsup": "^8.5.1",
-    "typescript": "^6.0.3",
+    "typescript": "^5.7.0",
     "vitest": "^4.1.9"
   }
 }

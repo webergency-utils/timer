@@ -1,11 +1,16 @@
 # @webergency-utils/timer
 
-[![npm version](https://img.shields.io/npm/v/@webergency-utils/timer.svg)](https://www.npmjs.com/package/@webergency-utils/timer)
-[![Maintenance](https://img.shields.io/badge/maintenance-active-brightgreen.svg)](#maintenance)
-[![npm downloads](https://img.shields.io/npm/dm/@webergency-utils/timer.svg)](https://www.npmjs.com/package/@webergency-utils/timer)
-[![license](https://img.shields.io/npm/l/@webergency-utils/timer.svg)](https://github.com/webergency-utils/timer/blob/master/LICENSE)
-
 An efficient, accurate, and robust task scheduling and cron timer library for Node.js. It supports interval-based timers, absolute/relative deadlines, cron expressions, custom timezones, and configurable retry backoffs.
+
+[![npm version](https://img.shields.io/npm/v/%40webergency-utils%2Ftimer)](https://www.npmjs.com/package/@webergency-utils/timer)
+[![License](https://img.shields.io/npm/l/%40webergency-utils%2Ftimer)](https://www.npmjs.com/package/@webergency-utils/timer)
+[![Maintenance](https://img.shields.io/badge/maintenance-active-brightgreen.svg)](#maintenance)
+[![dependencies](https://img.shields.io/badge/dependencies-1-brightgreen.svg)](https://www.npmjs.com/package/@webergency-utils/timer?activeTab=dependencies)
+[![npm downloads](https://img.shields.io/npm/dm/%40webergency-utils%2Ftimer)](https://www.npmjs.com/package/@webergency-utils/timer)<br>
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/webergency-utils/timer/badge)](https://securityscorecards.dev/viewer/?uri=github.com/webergency-utils/timer)
+[![codecov](https://codecov.io/gh/webergency-utils/timer/graph/badge.svg?token=)](https://codecov.io/gh/webergency-utils/timer)
+[![CI](https://github.com/webergency-utils/timer/actions/workflows/ci.yml/badge.svg)](https://github.com/webergency-utils/timer/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/webergency-utils/timer/actions/workflows/codeql.yml/badge.svg)](https://github.com/webergency-utils/timer/actions/workflows/codeql.yml)
 
 ## TL;DR
 
@@ -15,16 +20,14 @@ import Timer from '@webergency-utils/timer';
 const timer = new Timer();
 
 // 1. Cron-style scheduling: Run every hour at minute 0
-timer.set( 'sync-task', '0 * * * *', ( { id } ) =>
-{
-    console.log( `Running background sync task: ${id}` );
+timer.set('sync-task', '0 * * * *', ({ id }) => {
+  console.log(`Running background sync task: ${id}`);
 });
 
 // 2. Interval-style scheduling: Run in 5 seconds, and repeat every 10 seconds
-timer.set( 'poll-task', 5000, ( { id } ) =>
-{
-    console.log( `Running poll task: ${id}` );
-}, { interval: 10000 } );
+timer.set('poll-task', 5000, ({ id }) => {
+  console.log(`Running poll task: ${id}`);
+}, { interval: 10000 });
 ```
 
 ## Installation & Setup
@@ -248,9 +251,7 @@ Timer.id( prefix?: string ): string
 #### `TimerConstructorOptions`
 
 ```typescript
-type TimerConstructorOptions
-=
-{
+type TimerConstructorOptions = {
     timezone? : string
     retry?    : RetryOptions
 }
@@ -259,9 +260,7 @@ type TimerConstructorOptions
 #### `RetryOptions`
 
 ```typescript
-type RetryOptions
-=
-{
+type RetryOptions = {
     attempts? : number
     delay?    : number
     backoff?  : 'constant' | 'exponential'
@@ -271,19 +270,12 @@ type RetryOptions
 #### `TimerCallback`
 
 ```typescript
-type TimerCallback
-<
-    Data = any
->
-=
-(
-    context :
-    {
+type TimerCallback<Data = any> = (
+    context : {
         id   : string
         data : Data
     }
-)
-=> any
+) => any
 ```
 
 ---
