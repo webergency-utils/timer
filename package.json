@@ -40,7 +40,7 @@
     "url": "git+https://github.com/webergency-utils/timer.git"
   },
   "dependencies": {
-    "@webergency-utils/heap": "^0.0.1"
+    "@webergency-utils/heap": "^1.0.1"
   },
   "devDependencies": {
     "@jazzer.js/core": "^4.0.0",
