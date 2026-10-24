@@ -1,0 +1,6 @@
+name: Timer CodeQL config
+
+# Tests intentionally exercise adversarial inputs and edge cases.
+paths-ignore:
+  - 'tests/**'
+  - 'src/tests/**'
