@@ -16,7 +16,7 @@ describe( 'Timer tests without fake timers (real environment)', () =>
         // This will trigger `time.constructor === Date` check inside normalize()
         timer.set( 'realDateTask', new Date( Date.now() + 10000 ), cb );
 
-        expect( timer.has( 'realDateTask' ) ).toBe( true );
+        expect( timer.has( 'realDateTask' )).toBe( true );
 
         timer.destroy();
     });
@@ -29,13 +29,13 @@ describe( 'Timer tests without fake timers (real environment)', () =>
             const next = getNextCronDate( '5/2 12 * * *', baseDate );
 
             // Starts at minute 5, then 7, 9...
-            expect( next.getUTCMinutes() ).toBe( 5 );
+            expect( next.getUTCMinutes()).toBe( 5 );
         });
 
         test( 'should throw error on invalid range (start > end)', () =>
         {
             const baseDate = new Date( '2026-06-20T12:00:00Z' );
-            expect( () => getNextCronDate( '0 12 10-5 * *', baseDate ) ).toThrowError( 'Invalid range.' );
+            expect(() => getNextCronDate( '0 12 10-5 * *', baseDate )).toThrowError( 'Invalid range.' );
         });
 
         test( 'should handle nearest weekday 1W when the 1st is a Saturday (returns Monday 3rd)', () =>
@@ -44,7 +44,7 @@ describe( 'Timer tests without fake timers (real environment)', () =>
             const baseDate = new Date( '2026-08-01T00:00:00Z' );
             const next = getNextCronDate( '0 12 1W * *', baseDate );
 
-            expect( next.getUTCDate() ).toBe( 3 );
+            expect( next.getUTCDate()).toBe( 3 );
         });
 
         test( 'should handle nearest weekday 15W when 15th is Saturday (returns Friday 14th)', () =>
@@ -53,7 +53,7 @@ describe( 'Timer tests without fake timers (real environment)', () =>
             const baseDate = new Date( '2026-08-01T00:00:00Z' );
             const next = getNextCronDate( '0 12 15W * *', baseDate );
 
-            expect( next.getUTCDate() ).toBe( 14 );
+            expect( next.getUTCDate()).toBe( 14 );
         });
 
         test( 'should handle nearest weekday 15W when 15th is already a weekday (returns 15th)', () =>
@@ -62,7 +62,7 @@ describe( 'Timer tests without fake timers (real environment)', () =>
             const baseDate = new Date( '2026-06-01T00:00:00Z' );
             const next = getNextCronDate( '0 12 15W * *', baseDate );
 
-            expect( next.getUTCDate() ).toBe( 15 );
+            expect( next.getUTCDate()).toBe( 15 );
         });
 
         test( 'should handle last weekday of month LW when last day is Sunday (returns Friday 29th)', () =>
@@ -71,32 +71,32 @@ describe( 'Timer tests without fake timers (real environment)', () =>
             const baseDate = new Date( '2026-05-01T00:00:00Z' );
             const next = getNextCronDate( '0 12 LW * *', baseDate );
 
-            expect( next.getUTCDate() ).toBe( 29 );
+            expect( next.getUTCDate()).toBe( 29 );
         });
 
         test( 'should throw on invalid step values', () =>
         {
             const baseDate = new Date();
-            expect( () => getNextCronDate( '*/0 * * * *', baseDate ) ).toThrowError( 'Invalid step value.' );
-            expect( () => getNextCronDate( '*/-5 * * * *', baseDate ) ).toThrowError( 'Invalid step value.' );
+            expect(() => getNextCronDate( '*/0 * * * *', baseDate )).toThrowError( 'Invalid step value.' );
+            expect(() => getNextCronDate( '*/-5 * * * *', baseDate )).toThrowError( 'Invalid step value.' );
         });
 
         test( 'should throw on invalid range syntax for step', () =>
         {
             const baseDate = new Date();
-            expect( () => getNextCronDate( '1-2-3/2 * * * *', baseDate ) ).toThrowError( 'Invalid range syntax for step.' );
+            expect(() => getNextCronDate( '1-2-3/2 * * * *', baseDate )).toThrowError( 'Invalid range syntax for step.' );
         });
 
         test( 'should throw on invalid range boundaries for step', () =>
         {
             const baseDate = new Date();
-            expect( () => getNextCronDate( '10-5/2 * * * *', baseDate ) ).toThrowError( 'Invalid range for step.' );
+            expect(() => getNextCronDate( '10-5/2 * * * *', baseDate )).toThrowError( 'Invalid range for step.' );
         });
 
         test( 'should throw on invalid start value for step', () =>
         {
             const baseDate = new Date();
-            expect( () => getNextCronDate( '65/2 * * * *', baseDate ) ).toThrowError( 'Invalid start value for step.' );
+            expect(() => getNextCronDate( '65/2 * * * *', baseDate )).toThrowError( 'Invalid start value for step.' );
         });
 
         test( 'should handle DST transition offset difference in America/New_York', () =>
@@ -107,7 +107,7 @@ describe( 'Timer tests without fake timers (real environment)', () =>
             const next = getNextCronDate( '0 5 8 3 *', baseDate, 'America/New_York' );
 
             expect( next ).toBeInstanceOf( Date );
-            expect( next.getUTCHours() ).toBe( 9 ); // 5:00 AM EDT is 9:00 AM UTC
+            expect( next.getUTCHours()).toBe( 9 ); // 5:00 AM EDT is 9:00 AM UTC
         });
     });
 });

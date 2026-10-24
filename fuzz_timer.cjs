@@ -8,6 +8,12 @@ const CRON_PATTERNS = [
   '0 0 * * *',
   '30 14 1 1 *',
   '0 12 * * 1-5',
+  '7 17 27 * 1-7',
+  '0 12 L * *',
+  '0 12 LW * *',
+  '0 12 15W * *',
+  '0 12 * * 5L',
+  '0 12 * * 5#3',
   'invalid cron pattern'
 ];
 
@@ -23,7 +29,7 @@ module.exports.fuzz = function(data) {
   let timer;
   try {
     const provider = new FuzzedDataProvider(data);
-    
+
     const tz = provider.pickValue(TIMEZONES);
     const hasRetry = provider.consumeBoolean();
     const retry = hasRetry
@@ -34,7 +40,14 @@ module.exports.fuzz = function(data) {
         }
       : undefined;
 
-    timer = new Timer('fuzz-timer', { timezone: tz, retry });
+    try {
+      timer = new Timer('fuzz-timer', { timezone: tz, retry });
+    } catch (e) {
+      if (tz === 'Invalid/Timezone') {
+        return;
+      }
+      throw e;
+    }
 
     const numOperations = provider.consumeIntegralInRange(1, 20);
 
@@ -52,7 +65,7 @@ module.exports.fuzz = function(data) {
         }
         case 1: {
           // set with cron string
-          const cronExpr = provider.pickValue(CRON_PATTERNS);
+          const cronExpr = provider.consumeBoolean() ? provider.pickValue(CRON_PATTERNS) : provider.consumeString(25);
           try {
             timer.set(taskId, cronExpr, () => {}, { data: provider.consumeString(10) });
           } catch (e) {
@@ -70,10 +83,10 @@ module.exports.fuzz = function(data) {
           timer.postpone(taskId, provider.consumeIntegralInRange(100, 5000));
           break;
         case 4:
-          timer.pause(taskId);
+          timer.pause(provider.consumeBoolean() ? taskId : undefined);
           break;
         case 5:
-          timer.resume(taskId);
+          timer.resume(provider.consumeBoolean() ? taskId : undefined);
           break;
         case 6:
           timer.unset(taskId);

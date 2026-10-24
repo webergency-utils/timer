@@ -8,35 +8,44 @@ const MAX_TIMEOUT_MS = 365 * 24 * 60 * 60 * 1000;
 
 const normalize = ( time: Date | number, offset: number = 0 ) =>
 {
+    const validOffset = ( typeof offset === 'number' && Number.isFinite( offset )) ? offset : 0;
+
     if( typeof time === 'number' )
     {
-        return ( time < MAX_TIMEOUT_MS ? Date.now() + time : time ) + offset;
+        if( !Number.isFinite( time ))
+        {
+            throw new Error( 'Invalid deadline.' );
+        }
+
+        return ( time < MAX_TIMEOUT_MS ? Date.now() + time : time ) + validOffset;
     }
 
-    let clone: Date;
-
-    if( time.constructor === Date )
+    if( !time || typeof time !== 'object' )
     {
-        clone = new Date( time.getTime() );
+        throw new Error( 'Invalid deadline.' );
+    }
+
+    let ms: number;
+
+    if( typeof time.getTime === 'function' )
+    {
+        ms = time.getTime();
+    }
+    else if( typeof time.toISOString === 'function' )
+    {
+        ms = new Date( time.toISOString()).getTime();
     }
     else
     {
-        try
-        {
-            clone = new ( time.constructor as any )( time ) as Date;
-        }
-        catch( e )
-        {
-            clone = new Date( time.toISOString() );
-        }
+        throw new Error( 'Invalid deadline.' );
     }
 
-    if( offset )
+    if( !Number.isFinite( ms ))
     {
-        clone.setMilliseconds( clone.getMilliseconds() + offset );
+        throw new Error( 'Invalid deadline.' );
     }
 
-    return clone.getTime();
+    return ms + validOffset;
 };
 
 let globallyPaused = false;
@@ -46,10 +55,13 @@ export default class Timer
     /* STATIC */
 
     static #timers = new Set<Timer>();
+    static #idCounter = Math.floor( Math.random() * 65536 );
 
     public static id( prefix: string = '' ): string
     {
-        return prefix + ( ( Date.now() % 137438953472 ) * 65536 + Math.floor( Math.random() * 65536 ) );
+        Timer.#idCounter = ( Timer.#idCounter + 1 ) & 0xFFFF;
+
+        return prefix + (( Date.now() % 137438953472 ) * 65536 + Timer.#idCounter );
     }
 
     public static pause()
@@ -74,21 +86,21 @@ export default class Timer
 
     /* INSTANCE */
 
-    #name: string | undefined;
+    #name : string | undefined;
 
     public get name()
     {
         return this.#name;
     }
-    #paused: boolean = false;
-    #timeout: ReturnType<typeof setTimeout> | undefined;
+    #paused          : boolean = false;
+    #timeout         : ReturnType<typeof setTimeout> | undefined;
     #index = new Map<string, TimerEntry>();
-    #heap = new Heap<TimerEntry, string>( ( a, b ) => a.deadline - b.deadline, i => i.id );
-    #defaultTimezone: string | undefined;
-    #defaultRetry: RetryOptions | undefined;
+    #heap = new Heap<TimerEntry, string>(( a, b ) => a.deadline - b.deadline, i => i.id );
+    #defaultTimezone : string | undefined;
+    #defaultRetry    : RetryOptions | undefined;
 
-    public constructor( options?: TimerConstructorOptions )
-    public constructor( name?: string, options?: TimerConstructorOptions )
+    public constructor( options?: TimerConstructorOptions );
+    public constructor( name?: string, options?: TimerConstructorOptions );
     public constructor( nameOrOptions?: string | TimerConstructorOptions, options?: TimerConstructorOptions )
     {
         let name: string | undefined;
@@ -106,7 +118,7 @@ export default class Timer
 
         this.#name = name;
         this.#defaultTimezone = opts?.timezone;
-        this.#defaultRetry = opts?.retry;
+        this.#defaultRetry = opts?.retry ? { ...opts.retry } : undefined;
 
         if( this.#defaultTimezone !== undefined )
         {
@@ -120,47 +132,54 @@ export default class Timer
     {
         this.#timeout && clearTimeout( this.#timeout );
 
-        this.#timeout = !( this.#paused || globallyPaused ) && this.#heap.top() ? setTimeout( () => this.#dispatch(), Math.max( 0, Math.min( 60000, this.#heap.top()!.deadline - Date.now() ) ) ) : undefined;
+        const top = this.#heap.top();
+
+        this.#timeout = !( this.#paused || globallyPaused ) && top ? setTimeout(() => this.#dispatch(), Math.max( 0, Math.min( 60000, top.deadline - Date.now()))) : undefined;
     }
 
     #dispatch()
     {
         this.#timeout = undefined;
 
-        let top, now = Date.now();
+        let top;
+        const now = Date.now();
 
-        while( ( top = this.#heap.top() ) && ( top.deadline <= now + 16 ) )
+        while( !( this.#paused || globallyPaused ) && ( top = this.#heap.top()) && ( top.deadline <= now ))
         {
-            let timer = this.#heap.pop()!;
+            const timer = this.#heap.pop()!;
             const startTime = timer.deadline;
-            const startVersion = timer.version ?? 0;
+            const startVersion = timer.version!;
+
+            if( timer.expires !== undefined && timer.expires < now - 100 )
+            {
+                this.#index.delete( timer.id );
+
+                continue;
+            }
+
+            timer.inFlight = true;
 
             let result: any = null;
             let threwSync = false;
-            let syncError: any = null;
 
-            const shouldExecute = !timer.expires || timer.expires >= now - 100;
-
-            if( shouldExecute )
+            try
             {
-                try
-                {
-                    result = timer.callback( { id: timer.id, data: timer.data } );
-                }
-                catch( e )
-                {
-                    threwSync = true;
-                    syncError = e;
-                }
+                result = timer.callback({ id : timer.id, data : timer.data });
+            }
+            catch( e )
+            {
+                threwSync = true;
             }
 
-            const handleReschedule = ( endTime: number, isAsync: boolean, error: any ) =>
+            const handleReschedule = ( endTime: number, isAsync: boolean, failed: boolean ) =>
             {
                 const currentTimer = this.#index.get( timer.id );
 
-                if( currentTimer === timer && ( currentTimer.version ?? 0 ) === startVersion )
+                if( currentTimer === timer && currentTimer.version === startVersion )
                 {
-                    if( error && timer.retry && ( timer.retry.attempts ?? 0 ) > 0 )
+                    timer.inFlight = false;
+
+                    if( failed && timer.retry && ( timer.retry.attempts ?? 0 ) > 0 )
                     {
                         if( !timer.retryAttempt )
                         {
@@ -170,7 +189,7 @@ export default class Timer
                             {
                                 try
                                 {
-                                    nextRegular = getNextCronDate( timer.cron, new Date( Math.max( endTime, startTime ) ), timer.timezone ).getTime();
+                                    nextRegular = getNextCronDate( timer.cron, new Date( Math.max( endTime, startTime )), timer.timezone ).getTime();
                                 }
                                 catch( e )
                                 {
@@ -185,38 +204,45 @@ export default class Timer
                                 }
                                 else
                                 {
-                                    nextRegular = startTime + Math.ceil( Math.max( 1, ( endTime - startTime ) / timer.interval ) ) * timer.interval;
+                                    nextRegular = startTime + Math.ceil( Math.max( 1, ( endTime - startTime ) / timer.interval )) * timer.interval;
                                 }
                             }
 
                             timer.nextRegularFiring = nextRegular;
                         }
 
-                        const attempt = ( timer.retryAttempt ?? 0 ) + 1;
+                        const attempt = timer.retryAttempt! + 1;
 
-                        if( attempt <= ( timer.retry.attempts ?? 0 ) )
+                        if( attempt <= timer.retry.attempts! )
                         {
-                            timer.retryAttempt = attempt;
-                            const baseDelay = timer.retry.delay ?? 1000;
-                            const multiplier = timer.retry.backoff === 'exponential' ? Math.pow( 2, attempt - 1 ) : 1;
-                            const retryDelay = baseDelay * multiplier;
+                            const rawDelay = timer.retry.delay;
+                            const baseDelay = ( rawDelay !== undefined && Number.isFinite( rawDelay ) && rawDelay >= 0 ) ? rawDelay : 1000;
+                            const multiplier = timer.retry.backoff === 'exponential' ? Math.pow( 2, Math.min( attempt - 1, 30 )) : 1;
+                            const retryDelay = Math.min( MAX_TIMEOUT_MS, baseDelay * multiplier );
                             const jitter = retryDelay * ( Math.random() * 0.2 - 0.1 );
-                            const retryDeadline = Date.now() + Math.round( retryDelay + jitter );
+                            const retryDeadline = Date.now() + Math.max( 1, Math.round( retryDelay + jitter ));
 
                             if( timer.nextRegularFiring !== undefined && retryDeadline >= timer.nextRegularFiring )
                             {
                                 timer.deadline = timer.nextRegularFiring;
                                 timer.retryAttempt = 0;
                                 timer.nextRegularFiring = undefined;
-                                this.#heap.push( timer );
-                                this.#schedule();
+                            }
+                            else
+                            {
+                                timer.deadline = retryDeadline;
+                                timer.retryAttempt = attempt;
+                            }
+
+                            if( timer.expires !== undefined && timer.deadline > timer.expires )
+                            {
+                                this.#index.delete( timer.id );
 
                                 return;
                             }
 
-                            timer.deadline = retryDeadline;
-                            this.#heap.push( timer );
-                            this.#schedule();
+                            !timer.paused && this.#heap.push( timer );
+                            isAsync && this.#schedule();
 
                             return;
                         }
@@ -227,15 +253,11 @@ export default class Timer
 
                     let nextDeadline: number;
 
-                    if( timer.deadline > startTime )
-                    {
-                        nextDeadline = timer.deadline;
-                    }
-                    else if( timer.cron )
+                    if( timer.cron )
                     {
                         try
                         {
-                            nextDeadline = getNextCronDate( timer.cron, new Date( Math.max( endTime, startTime ) ), timer.timezone ).getTime();
+                            nextDeadline = getNextCronDate( timer.cron, new Date( Math.max( endTime, startTime )), timer.timezone ).getTime();
                         }
                         catch( e )
                         {
@@ -252,7 +274,7 @@ export default class Timer
                         }
                         else
                         {
-                            nextDeadline = startTime + Math.ceil( Math.max( 1, ( endTime - startTime ) / timer.interval ) ) * timer.interval;
+                            nextDeadline = startTime + Math.ceil( Math.max( 1, ( endTime - startTime ) / timer.interval )) * timer.interval;
                         }
                     }
                     else
@@ -262,22 +284,29 @@ export default class Timer
                         return;
                     }
 
+                    if( timer.expires !== undefined && nextDeadline > timer.expires )
+                    {
+                        this.#index.delete( timer.id );
+
+                        return;
+                    }
+
                     timer.deadline = nextDeadline;
-                    this.#heap.push( timer );
-                    this.#schedule();
+                    !timer.paused && this.#heap.push( timer );
+                    isAsync && this.#schedule();
                 }
             };
 
             if( !threwSync && result && typeof ( result as any ).then === 'function' )
             {
                 ( result as any ).then(
-                    () => handleReschedule( Date.now(), true, null ),
-                    ( err: any ) => handleReschedule( Date.now(), true, err || new Error( 'Async execution failed' ) )
+                    () => handleReschedule( Date.now(), true, false ),
+                    () => handleReschedule( Date.now(), true, true )
                 );
             }
             else
             {
-                handleReschedule( Date.now(), false, threwSync ? syncError : null );
+                handleReschedule( Date.now(), false, threwSync );
             }
         }
 
@@ -296,10 +325,10 @@ export default class Timer
 
     public ids(): string[]
     {
-        return Array.from( this.#index.keys() );
+        return Array.from( this.#index.keys());
     }
 
-    public set<Data = any>( id: string, deadline: Date | number | string, callback: TimerCallback<Data>, options: TimerOptions<Data> = {} )
+    public set<Data = any>( id: string, deadline: Date | number | string, callback: TimerCallback<Data>, options: TimerOptions<Data> = {})
     {
         if( typeof deadline === 'string' && options.interval !== undefined )
         {
@@ -308,15 +337,16 @@ export default class Timer
 
         if( options.expires !== undefined )
         {
-            if( typeof options.expires === 'number' && options.expires <= MAX_TIMEOUT_MS )
+            if( typeof options.expires === 'number' && ( !Number.isFinite( options.expires ) || options.expires <= MAX_TIMEOUT_MS ))
             {
                 throw new Error( 'Expiry time must be an absolute timestamp or Date.' );
             }
         }
 
-        let timer = this.#index.get( id ), expires = options.expires ? normalize( options.expires ) : undefined;
+        let timer = this.#index.get( id );
+        const expires = options.expires !== undefined ? normalize( options.expires ) : undefined;
 
-        if( expires !== undefined && expires < Date.now() )
+        if( expires !== undefined && expires < Date.now())
         {
             if( timer )
             {
@@ -327,6 +357,7 @@ export default class Timer
         }
 
         const timezone = options.timezone !== undefined ? options.timezone : this.#defaultTimezone;
+        const interval = ( typeof options.interval === 'number' && Number.isFinite( options.interval ) && options.interval > 0 ) ? options.interval : undefined;
         const retry = options.retry !== undefined
             ? ( options.retry ? { ...options.retry } : undefined )
             : ( this.#defaultRetry ? { ...this.#defaultRetry } : undefined );
@@ -346,19 +377,20 @@ export default class Timer
 
         if( timer )
         {
-            timer.version = ( timer.version ?? 0 ) + 1;
+            timer.version = timer.version! + 1;
+            timer.inFlight = false;
             timer.deadline = actualDeadline;
             timer.expires = expires;
             timer.callback = callback;
             timer.data = options.data;
             timer.cron = cronExpr;
-            timer.interval = options.interval;
+            timer.interval = interval;
             timer.retry = retry;
             timer.retryAttempt = 0;
             timer.nextRegularFiring = undefined;
             timer.timezone = timezone;
 
-            if( timer.paused || !this.#heap.has( id ) )
+            if( timer.paused || !this.#heap.has( id ))
             {
                 timer.paused = false;
                 this.#heap.push( timer );
@@ -370,14 +402,14 @@ export default class Timer
         }
         else
         {
-            this.#index.set( id, timer = { id, deadline: actualDeadline, expires, callback, data: options.data, cron: cronExpr, interval: options.interval, retry, retryAttempt: 0, nextRegularFiring: undefined, timezone, version: 1 } );
+            this.#index.set( id, timer = { id, deadline : actualDeadline, expires, callback, data : options.data, cron : cronExpr, interval, retry, retryAttempt : 0, nextRegularFiring : undefined, timezone, inFlight : false, version : 1 });
             this.#heap.push( timer );
         }
 
         this.#schedule();
     }
 
-    public postpone( id: string, deadline: Date | number, options: Omit<TimerOptions, 'data' | 'interval'> = {} ): boolean
+    public postpone( id: string, deadline: Date | number, options: Omit<TimerOptions, 'data' | 'interval'> = {}): boolean
     {
         const timer = this.#index.get( id );
 
@@ -385,38 +417,54 @@ export default class Timer
 
         if( options.expires !== undefined )
         {
-            if( typeof options.expires === 'number' && options.expires <= MAX_TIMEOUT_MS )
+            if( typeof options.expires === 'number' && ( !Number.isFinite( options.expires ) || options.expires <= MAX_TIMEOUT_MS ))
             {
                 throw new Error( 'Expiry time must be an absolute timestamp or Date.' );
             }
         }
 
-        const expires = options.expires ? normalize( options.expires ) : timer.expires;
+        if( options.timezone )
+        {
+            validateTimeZone( options.timezone );
+        }
 
-        if( expires !== undefined && expires < Date.now() )
+        const newDeadline = normalize( deadline, options.offset );
+        const expires = options.expires !== undefined ? normalize( options.expires ) : timer.expires;
+
+        if( expires !== undefined && expires < Date.now())
         {
             this.unset( id );
 
             return false;
         }
 
-        timer.version = ( timer.version ?? 0 ) + 1;
-        timer.deadline = normalize( deadline, options.offset );
+        timer.version = timer.version! + 1;
+        timer.inFlight = false;
+        timer.deadline = newDeadline;
         timer.expires = expires;
         timer.retryAttempt = 0;
         timer.nextRegularFiring = undefined;
 
-        if( timer.paused )
+        if( options.timezone !== undefined )
         {
-            // Keep it paused, do not push to heap
+            timer.timezone = options.timezone;
         }
-        else if( !this.#heap.has( timer.id ) )
+
+        if( options.retry !== undefined )
         {
-            this.#heap.push( timer );
+            timer.retry = options.retry ? { ...options.retry } : undefined;
         }
-        else
+
+        if( !timer.paused )
         {
-            this.#heap.update( timer );
+            if( !this.#heap.has( timer.id ))
+            {
+                this.#heap.push( timer );
+            }
+            else
+            {
+                this.#heap.update( timer );
+            }
         }
 
         this.#schedule();
@@ -486,8 +534,12 @@ export default class Timer
         if( timer && timer.paused )
         {
             timer.paused = false;
-            this.#heap.push( timer );
-            this.#schedule();
+
+            if( !timer.inFlight )
+            {
+                this.#heap.push( timer );
+                this.#schedule();
+            }
 
             return true;
         }

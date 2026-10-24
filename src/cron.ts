@@ -1,20 +1,28 @@
 const MONTH_NAMES = [ 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec' ];
 const DAY_NAMES = [ 'sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat' ];
+const MAX_CRON_CACHE_SIZE = 1000;
+const MAX_FORMATTER_CACHE_SIZE = 50;
+const INT_RE = /^-?\d+$/;
 
 type ParsedCron =
-{
-    minutes         : Set<number>
-    hours           : Set<number>
-    months          : Set<number>
-    isDOMRestricted : boolean
-    isDOWRestricted : boolean
-    isDOMMatch      : ( date: Date ) => boolean
-    isDOWMatch      : ( date: Date ) => boolean
-}
+    {
+        minutes         : Set<number>
+        hours           : Set<number>
+        months          : Set<number>
+        isDOMRestricted : boolean
+        isDOWRestricted : boolean
+        isDOMMatch      : ( date: Date ) => boolean
+        isDOWMatch      : ( date: Date ) => boolean
+    };
 
 const cronCache = new Map<string, ParsedCron>();
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
+
+function parseStrictInt( str: string ): number
+{
+    return INT_RE.test( str ) ? parseInt( str, 10 ) : NaN;
+}
 
 function getFormatter( timeZone: string ): Intl.DateTimeFormat
 {
@@ -22,16 +30,22 @@ function getFormatter( timeZone: string ): Intl.DateTimeFormat
 
     if( !f )
     {
-        f = new Intl.DateTimeFormat( 'en-US', {
-            timeZone,
-            hour12 : false,
-            year   : 'numeric',
-            month  : 'numeric',
-            day    : 'numeric',
-            hour   : 'numeric',
-            minute : 'numeric',
-            second : 'numeric'
-        });
+        f = new Intl.DateTimeFormat( 'en-US',
+            {
+                timeZone,
+                hourCycle : 'h23',
+                year      : 'numeric',
+                month     : 'numeric',
+                day       : 'numeric',
+                hour      : 'numeric',
+                minute    : 'numeric',
+                second    : 'numeric'
+            });
+
+        if( formatters.size >= MAX_FORMATTER_CACHE_SIZE )
+        {
+            formatters.delete( formatters.keys().next().value! );
+        }
 
         formatters.set( timeZone, f );
     }
@@ -43,15 +57,15 @@ export function validateTimeZone( timeZone: string )
 {
     try
     {
-        Intl.DateTimeFormat( undefined, { timeZone } );
+        Intl.DateTimeFormat( undefined, { timeZone });
     }
-    catch( e )
+    catch
     {
         throw new Error( 'Invalid timezone: ' + timeZone );
     }
 }
 
-function getTZOffset( date: Date, timeZone: string ): number
+function getTZParts( date: Date, timeZone: string ): Record<string, number>
 {
     const formatter = getFormatter( timeZone );
     const parts = formatter.formatToParts( date );
@@ -59,14 +73,18 @@ function getTZOffset( date: Date, timeZone: string ): number
 
     for( const p of parts )
     {
-        const val = parseInt( p.value, 10 );
-
         if( p.type !== 'literal' )
         {
-            dict[ p.type ] = p.type === 'hour' && val === 24 ? 0 : val;
+            dict[ p.type ] = parseInt( p.value, 10 );
         }
     }
 
+    return dict;
+}
+
+function getTZOffset( date: Date, timeZone: string ): number
+{
+    const dict = getTZParts( date, timeZone );
     const utc = Date.UTC( dict.year, dict.month - 1, dict.day, dict.hour, dict.minute, dict.second );
 
     return date.getTime() - utc;
@@ -74,7 +92,7 @@ function getTZOffset( date: Date, timeZone: string ): number
 
 function createTZDate( year: number, month: number, day: number, hour: number, minute: number, timeZone: string ): Date
 {
-    const utcEstimate = new Date( Date.UTC( year, month - 1, day, hour, minute ) );
+    const utcEstimate = new Date( Date.UTC( year, month - 1, day, hour, minute ));
     const offset = getTZOffset( utcEstimate, timeZone );
     const result = new Date( utcEstimate.getTime() + offset );
     const actualOffset = getTZOffset( result, timeZone );
@@ -87,32 +105,26 @@ function createTZDate( year: number, month: number, day: number, hour: number, m
     return result;
 }
 
-type TZDateInfo =
+function stepTZDate( prev: Date, year: number, month: number, day: number, hour: number, minute: number, timeZone: string, fallbackMs: number ): Date
 {
-    year    : number
-    month   : number
-    day     : number
-    hour    : number
-    minute  : number
-    weekday : number
+    const next = createTZDate( year, month, day, hour, minute, timeZone );
+
+    return next.getTime() > prev.getTime() ? next : new Date(( Math.floor( prev.getTime() / 60000 ) * 60000 ) + fallbackMs );
 }
+
+type TZDateInfo =
+    {
+        year    : number
+        month   : number
+        day     : number
+        hour    : number
+        minute  : number
+        weekday : number
+    };
 
 function getTZDateInfo( date: Date, timeZone: string ): TZDateInfo
 {
-    const formatter = getFormatter( timeZone );
-    const parts = formatter.formatToParts( date );
-    const dict: Record<string, number> = {};
-
-    for( const p of parts )
-    {
-        const val = parseInt( p.value, 10 );
-
-        if( p.type !== 'literal' )
-        {
-            dict[ p.type ] = p.type === 'hour' && val === 24 ? 0 : val;
-        }
-    }
-
+    const dict = getTZParts( date, timeZone );
     const weekday = new Date( dict.year, dict.month - 1, dict.day ).getDay();
 
     return {
@@ -125,25 +137,25 @@ function getTZDateInfo( date: Date, timeZone: string ): TZDateInfo
     };
 }
 
-function normalizeCronPart( part: string, isMonth: boolean ): string
+function normalizeMonthField( part: string ): string
 {
     let p = part.toLowerCase();
 
-    if( isMonth )
+    for( let i = 0; i < 12; i++ )
     {
-        for( let i = 0; i < 12; i++ )
-        {
-            p = p.replace( new RegExp( MONTH_NAMES[ i ], 'g' ), String( i + 1 ) );
-        }
+        p = p.replace( new RegExp( MONTH_NAMES[ i ], 'g' ), String( i + 1 ));
     }
-    else
-    {
-        for( let i = 0; i < 7; i++ )
-        {
-            p = p.replace( new RegExp( DAY_NAMES[ i ], 'g' ), String( i ) );
-        }
 
-        p = p.replace( /7/g, '0' );
+    return p;
+}
+
+function normalizeDOWField( part: string ): string
+{
+    let p = part.toLowerCase().replace( /-sun\b/g, '-7' );
+
+    for( let i = 0; i < 7; i++ )
+    {
+        p = p.replace( new RegExp( DAY_NAMES[ i ], 'g' ), String( i ));
     }
 
     return p;
@@ -163,22 +175,23 @@ function parseCronField( field: string, min: number, max: number ): Set<number>
                 values.add( i );
             }
         }
-        else if( part.includes( '/' ) )
+        else if( part.includes( '/' ))
         {
-            const [ range, stepStr ] = part.split( '/' );
-            const step = parseInt( stepStr, 10 );
+            const stepParts = part.split( '/' );
+            const step = stepParts.length === 2 ? parseStrictInt( stepParts[ 1 ]) : NaN;
 
             if( isNaN( step ) || step <= 0 )
             {
                 throw new Error( 'Invalid step value.' );
             }
 
+            const range = stepParts[ 0 ];
             let start = min;
             let end = max;
 
             if( range !== '*' && range !== '?' )
             {
-                if( range.includes( '-' ) )
+                if( range.includes( '-' ))
                 {
                     const rangeParts = range.split( '-' );
 
@@ -187,7 +200,8 @@ function parseCronField( field: string, min: number, max: number ): Set<number>
                         throw new Error( 'Invalid range syntax for step.' );
                     }
 
-                    const [ s, e ] = rangeParts.map( Number );
+                    const s = parseStrictInt( rangeParts[ 0 ]);
+                    const e = parseStrictInt( rangeParts[ 1 ]);
 
                     if( isNaN( s ) || isNaN( e ) || s < min || e > max || s > e )
                     {
@@ -199,7 +213,7 @@ function parseCronField( field: string, min: number, max: number ): Set<number>
                 }
                 else
                 {
-                    const s = parseInt( range, 10 );
+                    const s = parseStrictInt( range );
 
                     if( isNaN( s ) || s < min || s > max )
                     {
@@ -215,7 +229,7 @@ function parseCronField( field: string, min: number, max: number ): Set<number>
                 values.add( i );
             }
         }
-        else if( part.includes( '-' ) )
+        else if( part.includes( '-' ))
         {
             const rangeParts = part.split( '-' );
 
@@ -224,7 +238,8 @@ function parseCronField( field: string, min: number, max: number ): Set<number>
                 throw new Error( 'Invalid range syntax.' );
             }
 
-            const [ start, end ] = rangeParts.map( Number );
+            const start = parseStrictInt( rangeParts[ 0 ]);
+            const end = parseStrictInt( rangeParts[ 1 ]);
 
             if( isNaN( start ) || isNaN( end ) || start < min || end > max || start > end )
             {
@@ -238,7 +253,7 @@ function parseCronField( field: string, min: number, max: number ): Set<number>
         }
         else
         {
-            const val = parseInt( part, 10 );
+            const val = parseStrictInt( part );
 
             if( isNaN( val ) || val < min || val > max )
             {
@@ -255,7 +270,7 @@ function parseCronField( field: string, min: number, max: number ): Set<number>
 function getNearestWeekday( year: number, month: number, targetDay: number ): number
 {
     const totalDays = new Date( year, month + 1, 0 ).getDate();
-    let day = Math.min( targetDay, totalDays );
+    const day = Math.min( targetDay, totalDays );
     const d = new Date( year, month, day );
     const dayOfWeek = d.getDay();
 
@@ -277,12 +292,14 @@ function getNearestWeekday( year: number, month: number, targetDay: number ): nu
 
 function parseDOMItem( item: string ): ( date: Date ) => boolean
 {
-    if( item === '*' || item === '?' )
+    const lower = item.toLowerCase();
+
+    if( lower === '*' || lower === '?' )
     {
         return () => true;
     }
 
-    if( item.toLowerCase() === 'l' )
+    if( lower === 'l' )
     {
         return ( date ) =>
         {
@@ -292,7 +309,7 @@ function parseDOMItem( item: string ): ( date: Date ) => boolean
         };
     }
 
-    if( item.toLowerCase() === 'lw' || item.toLowerCase() === 'l-w' )
+    if( lower === 'lw' || lower === 'l-w' )
     {
         return ( date ) =>
         {
@@ -307,9 +324,14 @@ function parseDOMItem( item: string ): ( date: Date ) => boolean
         };
     }
 
-    if( item.toLowerCase().endsWith( 'w' ) )
+    if( lower.endsWith( 'w' ))
     {
-        const targetDay = parseInt( item, 10 );
+        const targetDay = parseStrictInt( lower.slice( 0, -1 ));
+
+        if( isNaN( targetDay ) || targetDay < 1 || targetDay > 31 )
+        {
+            throw new Error( 'Invalid nearest weekday value.' );
+        }
 
         return ( date ) =>
         {
@@ -317,21 +339,29 @@ function parseDOMItem( item: string ): ( date: Date ) => boolean
         };
     }
 
-    const values = parseCronField( item, 1, 31 );
+    const values = parseCronField( lower, 1, 31 );
 
-    return ( date ) => values.has( date.getDate() );
+    return ( date ) => values.has( date.getDate());
 }
 
 function parseDOWItem( item: string ): ( date: Date ) => boolean
 {
-    if( item === '*' || item === '?' )
+    const lower = item.toLowerCase();
+
+    if( lower === '*' || lower === '?' )
     {
         return () => true;
     }
 
-    if( item.toLowerCase().endsWith( 'l' ) )
+    if( lower.endsWith( 'l' ))
     {
-        const dayVal = parseInt( item, 10 );
+        const dayVal = parseStrictInt( lower.slice( 0, -1 ));
+
+        if( isNaN( dayVal ) || dayVal < 0 || dayVal > 7 )
+        {
+            throw new Error( 'Invalid last weekday of month value.' );
+        }
+
         const targetDay = dayVal === 7 ? 0 : dayVal;
 
         return ( date ) =>
@@ -344,24 +374,30 @@ function parseDOWItem( item: string ): ( date: Date ) => boolean
         };
     }
 
-    if( item.includes( '#' ) )
+    if( lower.includes( '#' ))
     {
-        const [ dayStr, occurrenceStr ] = item.split( '#' );
-        const dayVal = parseInt( dayStr, 10 );
+        const hashParts = lower.split( '#' );
+        const dayVal = hashParts.length === 2 ? parseStrictInt( hashParts[ 0 ]) : NaN;
+        const targetOccurrence = hashParts.length === 2 ? parseStrictInt( hashParts[ 1 ]) : NaN;
+
+        if( isNaN( dayVal ) || dayVal < 0 || dayVal > 7 || isNaN( targetOccurrence ) || targetOccurrence < 1 || targetOccurrence > 5 )
+        {
+            throw new Error( 'Invalid nth weekday of month value.' );
+        }
+
         const targetDay = dayVal === 7 ? 0 : dayVal;
-        const targetOccurrence = parseInt( occurrenceStr, 10 );
 
         return ( date ) =>
         {
             if( date.getDay() !== targetDay ){ return false }
 
-            const occurrence = Math.floor( ( date.getDate() - 1 ) / 7 ) + 1;
+            const occurrence = Math.floor(( date.getDate() - 1 ) / 7 ) + 1;
 
             return occurrence === targetOccurrence;
         };
     }
 
-    const rawValues = parseCronField( item, 0, 7 );
+    const rawValues = parseCronField( lower, 0, 7 );
     const values = new Set<number>();
 
     for( const val of rawValues )
@@ -369,7 +405,7 @@ function parseDOWItem( item: string ): ( date: Date ) => boolean
         values.add( val === 7 ? 0 : val );
     }
 
-    return ( date ) => values.has( date.getDay() );
+    return ( date ) => values.has( date.getDay());
 }
 
 export function getNextCronDate( cron: string, fromDate: Date = new Date(), timeZone?: string ): Date
@@ -379,32 +415,38 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
         validateTimeZone( timeZone );
     }
 
-    let parsed = cronCache.get( cron );
+    const cacheKey = cron.trim().replace( /\s+/g, ' ' );
+    let parsed = cronCache.get( cacheKey );
 
     if( !parsed )
     {
-        const fields = cron.trim().split( /\s+/ );
+        const fields = cacheKey.split( ' ' );
 
         if( fields.length !== 5 )
         {
             throw new Error( 'Invalid cron expression. Only 5-field expressions are supported.' );
         }
 
-        const minutes = parseCronField( normalizeCronPart( fields[ 0 ], false ), 0, 59 );
-        const hours = parseCronField( normalizeCronPart( fields[ 1 ], false ), 0, 23 );
-        const months = parseCronField( normalizeCronPart( fields[ 3 ], true ), 1, 12 );
+        const minutes = parseCronField( fields[ 0 ], 0, 59 );
+        const hours = parseCronField( fields[ 1 ], 0, 23 );
+        const months = parseCronField( normalizeMonthField( fields[ 3 ]), 1, 12 );
 
-        const domParts = normalizeCronPart( fields[ 2 ], false ).split( ',' );
+        const domParts = fields[ 2 ].split( ',' );
         const domMatchers = domParts.map( parseDOMItem );
         const isDOMRestricted = fields[ 2 ] !== '*' && fields[ 2 ] !== '?';
-        const isDOMMatch = ( date: Date ) => domMatchers.some( m => m( date ) );
+        const isDOMMatch = ( date: Date ) => domMatchers.some( m => m( date ));
 
-        const dowParts = normalizeCronPart( fields[ 4 ], false ).split( ',' );
+        const dowParts = normalizeDOWField( fields[ 4 ]).split( ',' );
         const dowMatchers = dowParts.map( parseDOWItem );
         const isDOWRestricted = fields[ 4 ] !== '*' && fields[ 4 ] !== '?';
-        const isDOWMatch = ( date: Date ) => dowMatchers.some( m => m( date ) );
+        const isDOWMatch = ( date: Date ) => dowMatchers.some( m => m( date ));
 
-        cronCache.set( cron, parsed = { minutes, hours, months, isDOMRestricted, isDOWRestricted, isDOMMatch, isDOWMatch } );
+        if( cronCache.size >= MAX_CRON_CACHE_SIZE )
+        {
+            cronCache.delete( cronCache.keys().next().value! );
+        }
+
+        cronCache.set( cacheKey, parsed = { minutes, hours, months, isDOMRestricted, isDOWRestricted, isDOMMatch, isDOWMatch });
     }
 
     const { minutes, hours, months, isDOMRestricted, isDOWRestricted, isDOMMatch, isDOWMatch } = parsed;
@@ -412,15 +454,15 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
     if( timeZone )
     {
         const infoStart = getTZDateInfo( fromDate, timeZone );
-        let current = createTZDate( infoStart.year, infoStart.month, infoStart.day, infoStart.hour, infoStart.minute + 1, timeZone );
-        const limit = new Date( current.getTime() );
+        let current = stepTZDate( fromDate, infoStart.year, infoStart.month, infoStart.day, infoStart.hour, infoStart.minute + 1, timeZone, 60000 );
+        const limit = new Date( current.getTime());
         limit.setFullYear( limit.getFullYear() + 5 );
 
-        while( current.getTime() < limit.getTime() )
+        while( current.getTime() < limit.getTime())
         {
             const info = getTZDateInfo( current, timeZone );
 
-            if( !months.has( info.month ) )
+            if( !months.has( info.month ))
             {
                 current = createTZDate( info.year, info.month + 1, 1, 0, 0, timeZone );
 
@@ -431,7 +473,7 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
 
             if( isDOMRestricted && isDOWRestricted )
             {
-                if( !isDOMMatch( localEquivalent ) && !isDOWMatch( localEquivalent ) )
+                if( !isDOMMatch( localEquivalent ) && !isDOWMatch( localEquivalent ))
                 {
                     current = createTZDate( info.year, info.month, info.day + 1, 0, 0, timeZone );
 
@@ -440,14 +482,14 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
             }
             else
             {
-                if( isDOMRestricted && !isDOMMatch( localEquivalent ) )
+                if( isDOMRestricted && !isDOMMatch( localEquivalent ))
                 {
                     current = createTZDate( info.year, info.month, info.day + 1, 0, 0, timeZone );
 
                     continue;
                 }
 
-                if( isDOWRestricted && !isDOWMatch( localEquivalent ) )
+                if( isDOWRestricted && !isDOWMatch( localEquivalent ))
                 {
                     current = createTZDate( info.year, info.month, info.day + 1, 0, 0, timeZone );
 
@@ -455,16 +497,16 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
                 }
             }
 
-            if( !hours.has( info.hour ) )
+            if( !hours.has( info.hour ))
             {
-                current = createTZDate( info.year, info.month, info.day, info.hour + 1, 0, timeZone );
+                current = stepTZDate( current, info.year, info.month, info.day, info.hour + 1, 0, timeZone, ( 60 - info.minute ) * 60000 );
 
                 continue;
             }
 
-            if( !minutes.has( info.minute ) )
+            if( !minutes.has( info.minute ))
             {
-                current = createTZDate( info.year, info.month, info.day, info.hour, info.minute + 1, timeZone );
+                current = new Date( current.getTime() + 60000 );
 
                 continue;
             }
@@ -474,20 +516,17 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
     }
     else
     {
-        let current = new Date( fromDate.getTime() );
-        current.setSeconds( 0, 0 );
-        current.setMinutes( current.getMinutes() + 1 );
-        const limit = new Date( current.getTime() );
+        const current = new Date(( Math.floor( fromDate.getTime() / 60000 ) + 1 ) * 60000 );
+        const limit = new Date( current.getTime());
         limit.setFullYear( limit.getFullYear() + 5 );
 
-        while( current.getTime() < limit.getTime() )
+        while( current.getTime() < limit.getTime())
         {
             const month = current.getMonth() + 1;
 
-            if( !months.has( month ) )
+            if( !months.has( month ))
             {
-                current.setMonth( current.getMonth() + 1 );
-                current.setDate( 1 );
+                current.setMonth( current.getMonth() + 1, 1 );
                 current.setHours( 0, 0, 0, 0 );
 
                 continue;
@@ -495,7 +534,7 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
 
             if( isDOMRestricted && isDOWRestricted )
             {
-                if( !isDOMMatch( current ) && !isDOWMatch( current ) )
+                if( !isDOMMatch( current ) && !isDOWMatch( current ))
                 {
                     current.setDate( current.getDate() + 1 );
                     current.setHours( 0, 0, 0, 0 );
@@ -505,7 +544,7 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
             }
             else
             {
-                if( isDOMRestricted && !isDOMMatch( current ) )
+                if( isDOMRestricted && !isDOMMatch( current ))
                 {
                     current.setDate( current.getDate() + 1 );
                     current.setHours( 0, 0, 0, 0 );
@@ -513,7 +552,7 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
                     continue;
                 }
 
-                if( isDOWRestricted && !isDOWMatch( current ) )
+                if( isDOWRestricted && !isDOWMatch( current ))
                 {
                     current.setDate( current.getDate() + 1 );
                     current.setHours( 0, 0, 0, 0 );
@@ -524,19 +563,18 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
 
             const hour = current.getHours();
 
-            if( !hours.has( hour ) )
+            if( !hours.has( hour ))
             {
-                current.setHours( current.getHours() + 1 );
-                current.setMinutes( 0, 0, 0 );
+                current.setTime( current.getTime() + (( 60 - current.getMinutes()) * 60000 ));
 
                 continue;
             }
 
             const minute = current.getMinutes();
 
-            if( !minutes.has( minute ) )
+            if( !minutes.has( minute ))
             {
-                current.setMinutes( current.getMinutes() + 1 );
+                current.setTime( current.getTime() + 60000 );
 
                 continue;
             }

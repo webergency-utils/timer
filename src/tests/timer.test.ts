@@ -4,30 +4,37 @@ import { getNextCronDate } from '../cron';
 
 let shouldMockRescheduleError = false;
 
-vi.mock('../cron', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../cron')>();
+vi.mock( '../cron', async ( importOriginal ) => 
+{
+    const actual = await importOriginal<typeof import( '../cron' )>();
+
     return {
         ...actual,
-        getNextCronDate: (cron: string, fromDate?: Date, timeZone?: string) => {
-            if (cron === 'trigger-reschedule-error') {
-                if (shouldMockRescheduleError) {
-                    throw new Error('No matching execution date found within 5 years.');
+        getNextCronDate : ( cron: string, fromDate?: Date, timeZone?: string ) => 
+        {
+            if( cron === 'trigger-reschedule-error' ) 
+            {
+                if( shouldMockRescheduleError ) 
+                {
+                    throw new Error( 'No matching execution date found within 5 years.' );
                 }
+
                 return new Date( Date.now() + 1000 );
             }
-            return actual.getNextCronDate(cron, fromDate, timeZone);
+
+            return actual.getNextCronDate( cron, fromDate, timeZone );
         }
     };
 });
 
 describe( 'Timer tests', () =>
 {
-    beforeEach( () =>
+    beforeEach(() =>
     {
         vi.useFakeTimers();
     });
 
-    afterEach( () =>
+    afterEach(() =>
     {
         vi.restoreAllMocks();
     });
@@ -38,12 +45,12 @@ describe( 'Timer tests', () =>
         const id2 = Timer.id( 'pref_' );
 
         expect( id1 ).not.toBe( id2 );
-        expect( id1.startsWith( 'pref_' ) ).toBe( true );
+        expect( id1.startsWith( 'pref_' )).toBe( true );
 
         const timer = new Timer();
         const id3 = timer.id( 'inst_' );
 
-        expect( id3.startsWith( 'inst_' ) ).toBe( true );
+        expect( id3.startsWith( 'inst_' )).toBe( true );
     });
 
     test( 'should allow creating multiple timers with the same name', () =>
@@ -62,10 +69,10 @@ describe( 'Timer tests', () =>
 
     test( 'should accept constructor default options and propagate them', () =>
     {
-        vi.setSystemTime( new Date( '2026-06-20T12:00:00Z' ) );
+        vi.setSystemTime( new Date( '2026-06-20T12:00:00Z' ));
 
-        const defaultRetry = { attempts: 3, delay: 100, backoff: 'constant' as const };
-        const timer = new Timer( { timezone: 'Europe/Prague', retry: defaultRetry } );
+        const defaultRetry = { attempts : 3, delay : 100, backoff : 'constant' as const };
+        const timer = new Timer({ timezone : 'Europe/Prague', retry : defaultRetry });
         const cb = vi.fn();
 
         // 1. Verify cron timezone uses constructor default
@@ -78,8 +85,8 @@ describe( 'Timer tests', () =>
 
     test( 'should validate default timezone in constructor and throw if invalid', () =>
     {
-        expect( () => new Timer( { timezone: 'Invalid/Zone' } ) ).toThrow( 'Invalid timezone: Invalid/Zone' );
-        expect( () => new Timer( 'some-name', { timezone: 'Invalid/Zone' } ) ).toThrow( 'Invalid timezone: Invalid/Zone' );
+        expect(() => new Timer({ timezone : 'Invalid/Zone' })).toThrow( 'Invalid timezone: Invalid/Zone' );
+        expect(() => new Timer( 'some-name', { timezone : 'Invalid/Zone' })).toThrow( 'Invalid timezone: Invalid/Zone' );
     });
 
     test( 'should fire callback when deadline is reached', () =>
@@ -104,13 +111,13 @@ describe( 'Timer tests', () =>
     {
         const timer = new Timer();
         const callback = vi.fn();
-        const testData = { message: 'hello world' };
+        const testData = { message : 'hello world' };
 
-        timer.set( 'task1', 500, callback, { data: testData } );
+        timer.set( 'task1', 500, callback, { data : testData });
 
         vi.advanceTimersByTime( 500 );
 
-        expect( callback ).toHaveBeenCalledWith( { id: 'task1', data: testData } );
+        expect( callback ).toHaveBeenCalledWith({ id : 'task1', data : testData });
     });
 
     test( 'should apply offset and expires correctly', () =>
@@ -118,7 +125,7 @@ describe( 'Timer tests', () =>
         const timer = new Timer();
         const callback = vi.fn();
 
-        timer.set( 'task1', 500, callback, { offset: 100 } );
+        timer.set( 'task1', 500, callback, { offset : 100 });
 
         vi.advanceTimersByTime( 550 );
 
@@ -135,7 +142,7 @@ describe( 'Timer tests', () =>
         const callback = vi.fn();
         const now = Date.now();
 
-        timer.set( 'task1', now + 500, callback, { expires: now + 550 } );
+        timer.set( 'task1', now + 500, callback, { expires : now + 550 });
 
         const dateSpy = vi.spyOn( Date, 'now' ).mockReturnValue( now + 700 );
 
@@ -194,7 +201,7 @@ describe( 'Timer tests', () =>
     {
         const timer = new Timer();
 
-        expect( timer.unset( 'nonexistent' ) ).toBe( false );
+        expect( timer.unset( 'nonexistent' )).toBe( false );
     });
 
     test( 'should clear all timers', () =>
@@ -255,41 +262,41 @@ describe( 'Timer tests', () =>
             const baseDate = new Date( '2026-06-20T12:00:15.000Z' );
             const d1 = getNextCronDate( '* * * * *', baseDate );
 
-            expect( d1.getMinutes() ).toBe( 1 );
-            expect( d1.getSeconds() ).toBe( 0 );
+            expect( d1.getMinutes()).toBe( 1 );
+            expect( d1.getSeconds()).toBe( 0 );
 
             const d2 = getNextCronDate( '*/5 * * * *', baseDate );
 
-            expect( d2.getMinutes() ).toBe( 5 );
-            expect( d2.getSeconds() ).toBe( 0 );
+            expect( d2.getMinutes()).toBe( 5 );
+            expect( d2.getSeconds()).toBe( 0 );
 
             const d3 = getNextCronDate( '0 9 * * 1-5', baseDate );
 
-            expect( d3.getDay() ).toBe( 1 );
-            expect( d3.getHours() ).toBe( 9 );
-            expect( d3.getMinutes() ).toBe( 0 );
+            expect( d3.getDay()).toBe( 1 );
+            expect( d3.getHours()).toBe( 9 );
+            expect( d3.getMinutes()).toBe( 0 );
 
             const d4 = getNextCronDate( '0 0 1 1 *', baseDate );
 
-            expect( d4.getMonth() ).toBe( 0 );
-            expect( d4.getDate() ).toBe( 1 );
-            expect( d4.getHours() ).toBe( 0 );
-            expect( d4.getMinutes() ).toBe( 0 );
+            expect( d4.getMonth()).toBe( 0 );
+            expect( d4.getDate()).toBe( 1 );
+            expect( d4.getHours()).toBe( 0 );
+            expect( d4.getMinutes()).toBe( 0 );
 
             const d5 = getNextCronDate( '0 0 1 jan *', baseDate );
 
-            expect( d5.getMonth() ).toBe( 0 );
-            expect( d5.getDate() ).toBe( 1 );
+            expect( d5.getMonth()).toBe( 0 );
+            expect( d5.getDate()).toBe( 1 );
 
             const d6 = getNextCronDate( '0 9 * * mon', baseDate );
 
-            expect( d6.getDay() ).toBe( 1 );
-            expect( d6.getHours() ).toBe( 9 );
+            expect( d6.getDay()).toBe( 1 );
+            expect( d6.getHours()).toBe( 9 );
         });
 
         test( 'should schedule a cron timer and fire repeatedly', () =>
         {
-            vi.setSystemTime( new Date( '2026-06-20T12:00:00.000Z' ) );
+            vi.setSystemTime( new Date( '2026-06-20T12:00:00.000Z' ));
 
             const timer = new Timer();
             const callback = vi.fn();
@@ -311,7 +318,7 @@ describe( 'Timer tests', () =>
 
         test( 'should unset a cron timer and stop execution', () =>
         {
-            vi.setSystemTime( new Date( '2026-06-20T12:00:00.000Z' ) );
+            vi.setSystemTime( new Date( '2026-06-20T12:00:00.000Z' ));
 
             const timer = new Timer();
             const callback = vi.fn();
@@ -331,7 +338,7 @@ describe( 'Timer tests', () =>
 
         test( 'should support postponing a cron timer', () =>
         {
-            vi.setSystemTime( new Date( '2026-06-20T12:00:00.000Z' ) );
+            vi.setSystemTime( new Date( '2026-06-20T12:00:00.000Z' ));
 
             const timer = new Timer();
             const callback = vi.fn();
@@ -363,7 +370,7 @@ describe( 'Timer tests', () =>
             const timer = new Timer();
             const callback = vi.fn();
 
-            timer.set( 'intervalTask', 500, callback, { interval: 200 } );
+            timer.set( 'intervalTask', 500, callback, { interval : 200 });
 
             vi.advanceTimersByTime( 499 );
 
@@ -387,7 +394,7 @@ describe( 'Timer tests', () =>
             const timer = new Timer();
             const callback = vi.fn();
 
-            expect( () => timer.set( 'task', '* * * * *', callback, { interval: 100 } ) )
+            expect(() => timer.set( 'task', '* * * * *', callback, { interval : 100 }))
                 .toThrowError( 'Cron timers cannot have an interval option.' );
         });
 
@@ -396,7 +403,7 @@ describe( 'Timer tests', () =>
             const timer = new Timer();
             const callback = vi.fn();
 
-            timer.set( 'intervalTask', 500, callback, { interval: 200 } );
+            timer.set( 'intervalTask', 500, callback, { interval : 200 });
 
             vi.advanceTimersByTime( 500 );
 
@@ -414,7 +421,7 @@ describe( 'Timer tests', () =>
             const timer = new Timer();
             const callback = vi.fn();
 
-            timer.set( 'intervalTask', 500, callback, { interval: 200 } );
+            timer.set( 'intervalTask', 500, callback, { interval : 200 });
 
             timer.postpone( 'intervalTask', 800 );
 
@@ -439,7 +446,7 @@ describe( 'Timer tests', () =>
             const callback = vi.fn();
 
             // Scheduled at 100, interval 100
-            timer.set( 'intervalTask', 100, callback, { interval: 100 } );
+            timer.set( 'intervalTask', 100, callback, { interval : 100 });
 
             // Delay execution tick until 250ms (now = 250)
             vi.setSystemTime( 250 );
@@ -466,15 +473,15 @@ describe( 'Timer tests', () =>
 
             const timer = new Timer();
             let resolveFunc: () => void = () => {};
-            const callback = vi.fn( () =>
+            const callback = vi.fn(() =>
             {
-                return new Promise<void>( ( resolve ) =>
+                return new Promise<void>(( resolve ) =>
                 {
                     resolveFunc = resolve;
                 });
             });
 
-            timer.set( 'asyncTask', 500, callback, { interval: 200 } );
+            timer.set( 'asyncTask', 500, callback, { interval : 200 });
 
             vi.advanceTimersByTime( 500 );
 
@@ -499,15 +506,15 @@ describe( 'Timer tests', () =>
 
             const timer = new Timer();
             let resolveFunc: () => void = () => {};
-            const callback = vi.fn( () =>
+            const callback = vi.fn(() =>
             {
-                return new Promise<void>( ( resolve ) =>
+                return new Promise<void>(( resolve ) =>
                 {
                     resolveFunc = resolve;
                 });
             });
 
-            timer.set( 'asyncTask', 500, callback, { interval: 200 } );
+            timer.set( 'asyncTask', 500, callback, { interval : 200 });
 
             vi.advanceTimersByTime( 500 );
 
@@ -529,22 +536,22 @@ describe( 'Timer tests', () =>
 
             const timer = new Timer();
             let resolveFunc: () => void = () => {};
-            const callback = vi.fn( () =>
+            const callback = vi.fn(() =>
             {
-                return new Promise<void>( ( resolve ) =>
+                return new Promise<void>(( resolve ) =>
                 {
                     resolveFunc = resolve;
                 });
             });
 
-            timer.set( 'asyncTask', 500, callback, { interval: 200 } );
+            timer.set( 'asyncTask', 500, callback, { interval : 200 });
 
             vi.advanceTimersByTime( 500 );
 
             expect( callback ).toHaveBeenCalledTimes( 1 );
 
             vi.advanceTimersByTime( 50 ); // clock is 550ms
-            timer.postpone( 'asyncTask', new Date( 1000 ) );
+            timer.postpone( 'asyncTask', new Date( 1000 ));
 
             vi.advanceTimersByTime( 100 ); // clock is 650ms
             resolveFunc();
@@ -564,52 +571,52 @@ describe( 'Timer tests', () =>
     {
         test( 'should parse abbreviations, wildcards, ranges and steps correctly', () =>
         {
-            const next = getNextCronDate( '0 12 * jan-dec/2 mon-fri/2', new Date( '2026-01-01T00:00:00Z' ) );
+            const next = getNextCronDate( '0 12 * jan-dec/2 mon-fri/2', new Date( '2026-01-01T00:00:00Z' ));
 
             expect( next ).toBeInstanceOf( Date );
         });
 
         test( 'should support ? character as wildcard', () =>
         {
-            const next1 = getNextCronDate( '0 12 ? * *', new Date( '2026-01-01T00:00:00Z' ) );
-            const next2 = getNextCronDate( '0 12 * * ?', new Date( '2026-01-01T00:00:00Z' ) );
+            const next1 = getNextCronDate( '0 12 ? * *', new Date( '2026-01-01T00:00:00Z' ));
+            const next2 = getNextCronDate( '0 12 * * ?', new Date( '2026-01-01T00:00:00Z' ));
 
-            expect( next1.getHours() ).toBe( 12 );
-            expect( next2.getHours() ).toBe( 12 );
-            expect( next1.getDate() ).toBe( 1 );
-            expect( next2.getDate() ).toBe( 1 );
+            expect( next1.getHours()).toBe( 12 );
+            expect( next2.getHours()).toBe( 12 );
+            expect( next1.getDate()).toBe( 1 );
+            expect( next2.getDate()).toBe( 1 );
         });
 
         test( 'should support L qualifier for last day of month', () =>
         {
-            const next = getNextCronDate( '0 12 L * *', new Date( '2026-01-01T00:00:00Z' ) );
+            const next = getNextCronDate( '0 12 L * *', new Date( '2026-01-01T00:00:00Z' ));
 
-            expect( next.getHours() ).toBe( 12 );
-            expect( next.getDate() ).toBe( 31 );
+            expect( next.getHours()).toBe( 12 );
+            expect( next.getDate()).toBe( 31 );
         });
 
         test( 'should support LW qualifier for last weekday of month', () =>
         {
-            const next = getNextCronDate( '0 12 LW * *', new Date( '2026-02-01T00:00:00Z' ) );
+            const next = getNextCronDate( '0 12 LW * *', new Date( '2026-02-01T00:00:00Z' ));
 
-            expect( next.getHours() ).toBe( 12 );
-            expect( next.getDate() ).toBe( 27 );
+            expect( next.getHours()).toBe( 12 );
+            expect( next.getDate()).toBe( 27 );
         });
 
         test( 'should support W qualifier for nearest weekday', () =>
         {
-            const next = getNextCronDate( '0 12 15W * *', new Date( '2026-02-01T00:00:00Z' ) );
+            const next = getNextCronDate( '0 12 15W * *', new Date( '2026-02-01T00:00:00Z' ));
 
-            expect( next.getHours() ).toBe( 12 );
-            expect( next.getDate() ).toBe( 16 );
+            expect( next.getHours()).toBe( 12 );
+            expect( next.getDate()).toBe( 16 );
         });
 
         test( 'should support # qualifier for nth occurrence of day-of-week in month', () =>
         {
-            const next = getNextCronDate( '0 12 * * 5#3', new Date( '2026-02-01T00:00:00Z' ) );
+            const next = getNextCronDate( '0 12 * * 5#3', new Date( '2026-02-01T00:00:00Z' ));
 
-            expect( next.getHours() ).toBe( 12 );
-            expect( next.getDate() ).toBe( 20 );
+            expect( next.getHours()).toBe( 12 );
+            expect( next.getDate()).toBe( 20 );
         });
 
         test( 'should throw syntax error immediately on malformed expression during set', () =>
@@ -617,16 +624,16 @@ describe( 'Timer tests', () =>
             const timer = new Timer();
             const callback = vi.fn();
 
-            expect( () => timer.set( 'task', 'invalid cron expr here', callback ) ).toThrow();
-            expect( () => timer.set( 'task', '0 12 32 * *', callback ) ).toThrow();
-            expect( () => timer.set( 'task', '0-1-2 12 * * *', callback ) ).toThrow();
-            expect( () => timer.set( 'task', '0 12 * * mon-wed-fri', callback ) ).toThrow();
+            expect(() => timer.set( 'task', 'invalid cron expr here', callback )).toThrow();
+            expect(() => timer.set( 'task', '0 12 32 * *', callback )).toThrow();
+            expect(() => timer.set( 'task', '0-1-2 12 * * *', callback )).toThrow();
+            expect(() => timer.set( 'task', '0 12 * * mon-wed-fri', callback )).toThrow();
         });
     });
 
     describe( 'Async retry policy', () =>
     {
-        beforeEach( () =>
+        beforeEach(() =>
         {
             vi.spyOn( Math, 'random' ).mockReturnValue( 0.5 );
         });
@@ -637,22 +644,23 @@ describe( 'Timer tests', () =>
 
             const timer = new Timer();
             let attempts = 0;
-            const callback = vi.fn( () =>
+            const callback = vi.fn(() =>
             {
                 attempts++;
+
                 if( attempts < 3 )
                 {
-                    return Promise.reject( new Error( 'Failing' ) );
+                    return Promise.reject( new Error( 'Failing' ));
                 }
 
                 return Promise.resolve( 'Success' );
             });
 
             timer.set( 'retryTask', 500, callback, {
-                retry: {
-                    attempts: 3,
-                    delay: 100,
-                    backoff: 'constant'
+                retry : {
+                    attempts : 3,
+                    delay    : 100,
+                    backoff  : 'constant'
                 }
             });
 
@@ -684,13 +692,13 @@ describe( 'Timer tests', () =>
             vi.setSystemTime( 0 );
 
             const timer = new Timer();
-            const callback = vi.fn( () => Promise.reject( new Error( 'Always failing' ) ) );
+            const callback = vi.fn(() => Promise.reject( new Error( 'Always failing' )));
 
             timer.set( 'retryTask', 500, callback, {
-                retry: {
-                    attempts: 3,
-                    delay: 100,
-                    backoff: 'exponential'
+                retry : {
+                    attempts : 3,
+                    delay    : 100,
+                    backoff  : 'exponential'
                 }
             });
 
@@ -730,10 +738,10 @@ describe( 'Timer tests', () =>
             vi.setSystemTime( 0 );
 
             const timer = new Timer();
-            const callback = vi.fn( () => Promise.reject( new Error( 'Failing' ) ) );
-            const retryOpts = { attempts: 3, delay: 100, backoff: 'constant' as const };
+            const callback = vi.fn(() => Promise.reject( new Error( 'Failing' )));
+            const retryOpts = { attempts : 3, delay : 100, backoff : 'constant' as const };
 
-            timer.set( 'retryTask', 500, callback, { retry: retryOpts } );
+            timer.set( 'retryTask', 500, callback, { retry : retryOpts });
 
             retryOpts.attempts = 0;
             retryOpts.delay = 0;
@@ -756,7 +764,7 @@ describe( 'Timer tests', () =>
             vi.setSystemTime( 0 );
 
             const timer = new Timer();
-            const callback = vi.fn( () => Promise.reject( new Error( 'Always failing' ) ) );
+            const callback = vi.fn(() => Promise.reject( new Error( 'Always failing' )));
 
             timer.set( 'intervalRetryTask', 500, callback, {
                 interval : 1000,
@@ -804,7 +812,7 @@ describe( 'Timer tests', () =>
             vi.setSystemTime( 0 );
 
             const timer = new Timer();
-            const callback = vi.fn( () => Promise.reject( new Error( 'Always failing' ) ) );
+            const callback = vi.fn(() => Promise.reject( new Error( 'Always failing' )));
 
             timer.set( 'intervalCapTask', 500, callback, {
                 interval : 1000,
@@ -845,10 +853,10 @@ describe( 'Timer tests', () =>
 
         test( 'should cap retry backoff deadline to next cron execution time and skip retries if exceeded', async () =>
         {
-            vi.setSystemTime( new Date( '2026-06-20T11:59:00Z' ).getTime() );
+            vi.setSystemTime( new Date( '2026-06-20T11:59:00Z' ).getTime());
 
             const timer = new Timer();
-            const callback = vi.fn( () => Promise.reject( new Error( 'Always failing' ) ) );
+            const callback = vi.fn(() => Promise.reject( new Error( 'Always failing' )));
 
             timer.set( 'cronCapTask', '* * * * *', callback, {
                 retry : {
@@ -889,12 +897,12 @@ describe( 'Timer tests', () =>
         {
             vi.setSystemTime( 0 );
 
-            const defaultRetry = { attempts: 3, delay: 100, backoff: 'constant' as const };
-            const timer = new Timer( { retry: defaultRetry } );
-            const callback = vi.fn( () => Promise.reject( new Error( 'Failing' ) ) );
+            const defaultRetry = { attempts : 3, delay : 100, backoff : 'constant' as const };
+            const timer = new Timer({ retry : defaultRetry });
+            const callback = vi.fn(() => Promise.reject( new Error( 'Failing' )));
 
             // Schedule task1 with retry explicitly set to null
-            timer.set( 'noRetryTask', 500, callback, { retry: null } );
+            timer.set( 'noRetryTask', 500, callback, { retry : null });
 
             vi.advanceTimersByTime( 500 );
 
@@ -914,7 +922,7 @@ describe( 'Timer tests', () =>
     {
         test( 'should throw an error for unknown timezone', () =>
         {
-            expect( () => getNextCronDate( '* * * * *', new Date(), 'Invalid/Zone' ) ).toThrowError( 'Invalid timezone: Invalid/Zone' );
+            expect(() => getNextCronDate( '* * * * *', new Date(), 'Invalid/Zone' )).toThrowError( 'Invalid timezone: Invalid/Zone' );
         });
 
         test( 'should calculate next cron date in UTC', () =>
@@ -922,8 +930,8 @@ describe( 'Timer tests', () =>
             const baseDate = new Date( '2026-06-20T00:00:00Z' );
             const next = getNextCronDate( '0 12 * * *', baseDate, 'UTC' );
 
-            expect( next.getUTCHours() ).toBe( 12 );
-            expect( next.getUTCMinutes() ).toBe( 0 );
+            expect( next.getUTCHours()).toBe( 12 );
+            expect( next.getUTCMinutes()).toBe( 0 );
         });
 
         test( 'should calculate next cron date in America/New_York', () =>
@@ -937,17 +945,17 @@ describe( 'Timer tests', () =>
                 hour12   : false
             });
 
-            expect( formatter.format( next ) ).toBe( '12' );
+            expect( formatter.format( next )).toBe( '12' );
         });
 
         test( 'should schedule and trigger timer using timezone', () =>
         {
-            vi.setSystemTime( new Date( '2026-06-20T12:00:00Z' ) );
+            vi.setSystemTime( new Date( '2026-06-20T12:00:00Z' ));
 
             const timer = new Timer();
             const callback = vi.fn();
 
-            timer.set( 'tzTask', '0 12 * * *', callback, { timezone: 'America/New_York' } );
+            timer.set( 'tzTask', '0 12 * * *', callback, { timezone : 'America/New_York' });
 
             vi.advanceTimersByTime( 3 * 3600 * 1000 );
 
@@ -1115,22 +1123,22 @@ describe( 'Timer tests', () =>
         {
             const timer = new Timer();
 
-            expect( timer.has( 'task1' ) ).toBe( false );
-            expect( timer.ids() ).toEqual( [] );
+            expect( timer.has( 'task1' )).toBe( false );
+            expect( timer.ids()).toEqual([]);
 
-            timer.set( 'task1', 500, () => {} );
-            timer.set( 'task2', 1000, () => {} );
+            timer.set( 'task1', 500, () => {});
+            timer.set( 'task2', 1000, () => {});
 
-            expect( timer.has( 'task1' ) ).toBe( true );
-            expect( timer.has( 'task2' ) ).toBe( true );
-            expect( timer.has( 'nonexistent' ) ).toBe( false );
-            expect( timer.ids().sort() ).toEqual( [ 'task1', 'task2' ] );
+            expect( timer.has( 'task1' )).toBe( true );
+            expect( timer.has( 'task2' )).toBe( true );
+            expect( timer.has( 'nonexistent' )).toBe( false );
+            expect( timer.ids().sort()).toEqual([ 'task1', 'task2' ]);
 
             timer.unset( 'task1' );
 
-            expect( timer.has( 'task1' ) ).toBe( false );
-            expect( timer.has( 'task2' ) ).toBe( true );
-            expect( timer.ids() ).toEqual( [ 'task2' ] );
+            expect( timer.has( 'task1' )).toBe( false );
+            expect( timer.has( 'task2' )).toBe( true );
+            expect( timer.ids()).toEqual([ 'task2' ]);
         });
     });
 
@@ -1144,7 +1152,7 @@ describe( 'Timer tests', () =>
                 vi.setSystemTime( 0 );
 
                 const timer = new Timer();
-                const callback = vi.fn( () => Promise.reject( new Error( 'Failing' ) ) );
+                const callback = vi.fn(() => Promise.reject( new Error( 'Failing' )));
 
                 timer.set( 'retryJitterTask', 500, callback, {
                     retry : {
@@ -1176,7 +1184,7 @@ describe( 'Timer tests', () =>
                 vi.setSystemTime( 0 );
 
                 const timer = new Timer();
-                const callback = vi.fn( () => Promise.reject( new Error( 'Failing' ) ) );
+                const callback = vi.fn(() => Promise.reject( new Error( 'Failing' )));
 
                 timer.set( 'retryJitterTask', 500, callback, {
                     retry : {
@@ -1210,11 +1218,11 @@ describe( 'Timer tests', () =>
         {
             const timer = new Timer();
 
-            expect( () => timer.set( 'task1', 500, () => {}, { expires: 1000 } ) ).toThrowError( 'Expiry time must be an absolute timestamp or Date.' );
+            expect(() => timer.set( 'task1', 500, () => {}, { expires : 1000 })).toThrowError( 'Expiry time must be an absolute timestamp or Date.' );
 
-            timer.set( 'task1', 500, () => {} );
+            timer.set( 'task1', 500, () => {});
 
-            expect( () => timer.postpone( 'task1', 500, { expires: 1000 } ) ).toThrowError( 'Expiry time must be an absolute timestamp or Date.' );
+            expect(() => timer.postpone( 'task1', 500, { expires : 1000 })).toThrowError( 'Expiry time must be an absolute timestamp or Date.' );
         });
 
         test( 'should not schedule the timer and should remove existing one if expires is in the past', () =>
@@ -1226,19 +1234,19 @@ describe( 'Timer tests', () =>
             const cb = vi.fn();
 
             // Set a timer that is already expired
-            timer.set( 'task1', baseTime + 1000, cb, { expires: baseTime - 1000 } );
+            timer.set( 'task1', baseTime + 1000, cb, { expires : baseTime - 1000 });
 
-            expect( timer.has( 'task1' ) ).toBe( false );
+            expect( timer.has( 'task1' )).toBe( false );
 
             // Set a valid timer
-            timer.set( 'task1', baseTime + 1000, cb, { expires: baseTime + 2000 } );
+            timer.set( 'task1', baseTime + 1000, cb, { expires : baseTime + 2000 });
 
-            expect( timer.has( 'task1' ) ).toBe( true );
+            expect( timer.has( 'task1' )).toBe( true );
 
             // Update with an expired expires value
-            timer.set( 'task1', baseTime + 1000, cb, { expires: baseTime - 500 } );
+            timer.set( 'task1', baseTime + 1000, cb, { expires : baseTime - 500 });
 
-            expect( timer.has( 'task1' ) ).toBe( false );
+            expect( timer.has( 'task1' )).toBe( false );
         });
 
         test( 'should remove timer and return false in postpone() if expires is in the past', () =>
@@ -1251,12 +1259,12 @@ describe( 'Timer tests', () =>
 
             timer.set( 'task1', baseTime + 1000, cb );
 
-            expect( timer.has( 'task1' ) ).toBe( true );
+            expect( timer.has( 'task1' )).toBe( true );
 
-            const postponed = timer.postpone( 'task1', baseTime + 2000, { expires: baseTime - 500 } );
+            const postponed = timer.postpone( 'task1', baseTime + 2000, { expires : baseTime - 500 });
 
             expect( postponed ).toBe( false );
-            expect( timer.has( 'task1' ) ).toBe( false );
+            expect( timer.has( 'task1' )).toBe( false );
         });
     });
 
@@ -1268,7 +1276,7 @@ describe( 'Timer tests', () =>
             vi.spyOn( Math, 'random' ).mockReturnValue( 0.5 ); // jitter is 0
 
             const timer = new Timer();
-            const callback = vi.fn( () => { throw new Error( 'Sync error' ); } );
+            const callback = vi.fn(() => { throw new Error( 'Sync error' ) });
 
             timer.set( 'syncIntervalRetryTask', 500, callback, {
                 interval : 1000,
@@ -1312,13 +1320,13 @@ describe( 'Timer tests', () =>
         {
             const timer = new Timer();
 
-            expect( timer.pause( 'nonexistent' ) ).toBe( false );
-            expect( timer.resume( 'nonexistent' ) ).toBe( false );
+            expect( timer.pause( 'nonexistent' )).toBe( false );
+            expect( timer.resume( 'nonexistent' )).toBe( false );
 
-            timer.set( 'task', 500, vi.fn() );
-            expect( timer.resume( 'task' ) ).toBe( false ); // already running
+            timer.set( 'task', 500, vi.fn());
+            expect( timer.resume( 'task' )).toBe( false ); // already running
             timer.pause( 'task' );
-            expect( timer.pause( 'task' ) ).toBe( false ); // already paused
+            expect( timer.pause( 'task' )).toBe( false ); // already paused
 
             timer.destroy();
         });
@@ -1328,11 +1336,11 @@ describe( 'Timer tests', () =>
             const baseDate = new Date( '2026-06-20T12:00:00Z' ); // 2026-06-20 is Saturday
             // 1. DOW restriction: schedule only on Sunday (0) or Monday (1)
             const nextSun = getNextCronDate( '0 12 * * 0,1', baseDate, 'America/New_York' );
-            expect( nextSun.getUTCDay() ).toBe( 0 ); // Sunday
+            expect( nextSun.getUTCDay()).toBe( 0 ); // Sunday
 
             // 2. DOM restriction: schedule only on the 25th of the month
             const next25 = getNextCronDate( '0 12 25 * *', baseDate, 'America/New_York' );
-            expect( next25.getUTCDate() ).toBe( 25 );
+            expect( next25.getUTCDate()).toBe( 25 );
         });
 
         test( 'should union-match DOM and DOW restrictions in non-timezone cron', () =>
@@ -1340,13 +1348,13 @@ describe( 'Timer tests', () =>
             const baseDate = new Date( '2026-06-20T12:00:00Z' ); // June 20, 2026 is Saturday
             // Schedule on the 22nd (Monday) OR on any Wednesday (3)
             const next = getNextCronDate( '0 12 22 * 3', baseDate );
-            expect( next.getUTCDate() ).toBe( 22 ); // June 22 matches DOM
+            expect( next.getUTCDate()).toBe( 22 ); // June 22 matches DOM
         });
 
         test( 'should throw if no matching cron date is found within 5 years', () =>
         {
             const baseDate = new Date( '2026-06-20T12:00:00Z' );
-            expect( () => getNextCronDate( '0 12 30 2 *', baseDate ) ).toThrowError( 'No matching execution date found within 5 years.' );
+            expect(() => getNextCronDate( '0 12 30 2 *', baseDate )).toThrowError( 'No matching execution date found within 5 years.' );
         });
 
         test( 'should accept Date object with offset in normalize()', () =>
@@ -1355,7 +1363,7 @@ describe( 'Timer tests', () =>
             const timer = new Timer();
             const cb = vi.fn();
 
-            timer.set( 'dateTask', new Date( 1000 ), cb, { offset: 100 } );
+            timer.set( 'dateTask', new Date( 1000 ), cb, { offset : 100 });
 
             vi.advanceTimersByTime( 1099 );
             expect( cb ).not.toHaveBeenCalled();
@@ -1368,13 +1376,13 @@ describe( 'Timer tests', () =>
 
         test( 'should fallback to toISOString when cloning custom date-like object throws in normalize()', () =>
         {
-            vi.setSystemTime( new Date( '2026-06-20T11:59:59Z' ).getTime() );
+            vi.setSystemTime( new Date( '2026-06-20T11:59:59Z' ).getTime());
             const timer = new Timer();
             const cb = vi.fn();
 
             const customDate = {
-                constructor: null,
-                toISOString: () => '2026-06-20T12:00:00Z'
+                constructor : null,
+                toISOString : () => '2026-06-20T12:00:00Z'
             };
 
             timer.set( 'customDateTask', customDate as any, cb );
@@ -1393,17 +1401,18 @@ describe( 'Timer tests', () =>
             vi.setSystemTime( 0 );
 
             const timer = new Timer();
-            const cb = vi.fn( ( { id } ) =>
+            const cb = vi.fn(({ id }) =>
             {
                 // Call set again inside the callback to reschedule (relative delay 700ms, absolute 1200ms)
                 timer.set( id, 700, cb );
-                return Promise.reject( new Error( 'Failing' ) );
+
+                return Promise.reject( new Error( 'Failing' ));
             });
 
             // Set with retry policy and interval
             timer.set( 'task1', 500, cb, {
                 interval : 1000,
-                retry    : { attempts: 3, delay: 100 }
+                retry    : { attempts : 3, delay : 100 }
             });
 
             vi.advanceTimersByTime( 500 );
@@ -1433,9 +1442,9 @@ describe( 'Timer tests', () =>
                 bar : number
             }
 
-            const data: CustomData = { foo: 'hello', bar: 123 };
+            const data: CustomData = { foo : 'hello', bar : 123 };
 
-            timer.set( 'inferTask', 500, ( { id, data: ctxData } ) =>
+            timer.set( 'inferTask', 500, ({ id, data: ctxData }) =>
             {
                 const fooVal: string = ctxData.foo;
                 const barVal: number = ctxData.bar;
@@ -1443,7 +1452,7 @@ describe( 'Timer tests', () =>
                 expect( id ).toBe( 'inferTask' );
                 expect( fooVal ).toBe( 'hello' );
                 expect( barVal ).toBe( 123 );
-            }, { data } );
+            }, { data });
 
             vi.advanceTimersByTime( 500 );
             timer.destroy();
@@ -1459,7 +1468,7 @@ describe( 'Timer tests', () =>
             // Set succeeds initially with mock returning a deadline at 1000ms
             shouldMockRescheduleError = false;
             timer.set( 'tooFarTask', 'trigger-reschedule-error', cb );
-            expect( timer.has( 'tooFarTask' ) ).toBe( true );
+            expect( timer.has( 'tooFarTask' )).toBe( true );
 
             // Enable reschedule error mock
             shouldMockRescheduleError = true;
@@ -1471,7 +1480,7 @@ describe( 'Timer tests', () =>
             expect( cb ).toHaveBeenCalledTimes( 1 );
 
             // Reschedule should throw error internally, deleting the task from the index
-            expect( timer.has( 'tooFarTask' ) ).toBe( false );
+            expect( timer.has( 'tooFarTask' )).toBe( false );
 
             timer.destroy();
         });
@@ -1482,8 +1491,8 @@ describe( 'Timer tests', () =>
             const baseDate = new Date( '2026-06-20T12:00:00Z' );
             const next = getNextCronDate( '0 12 * * 5L', baseDate );
 
-            expect( next.getUTCDate() ).toBe( 26 );
-            expect( next.getUTCDay() ).toBe( 5 ); // Friday
+            expect( next.getUTCDate()).toBe( 26 );
+            expect( next.getUTCDay()).toBe( 5 ); // Friday
         });
 
         test( 'should handle timezone-aware cron with non-matching starting month', () =>
@@ -1492,7 +1501,7 @@ describe( 'Timer tests', () =>
             const baseDate = new Date( '2026-06-20T12:00:00Z' );
             const next = getNextCronDate( '0 12 * 12 *', baseDate, 'America/New_York' );
 
-            expect( next.getUTCMonth() ).toBe( 11 ); // December (0-indexed)
+            expect( next.getUTCMonth()).toBe( 11 ); // December (0-indexed)
         });
 
         test( 'should union-match DOM and DOW in timezone-aware cron when both restricted', () =>
@@ -1504,7 +1513,364 @@ describe( 'Timer tests', () =>
             const baseDate = new Date( '2026-06-20T12:00:00Z' );
             const next = getNextCronDate( '0 12 15 * 5', baseDate, 'America/New_York' );
 
-            expect( next.getUTCDate() ).toBe( 26 );
+            expect( next.getUTCDate()).toBe( 26 );
+        });
+
+        test( 'should preserve digit 7 across minutes, hours, DOM, and DOW ranges/qualifiers', () =>
+        {
+            const baseDate = new Date( '2026-06-01T00:00:00Z' );
+
+            // Minute 7, Hour 17, DOM 7
+            const nextDom7 = getNextCronDate( '7 17 7 * *', baseDate, 'UTC' );
+            expect( nextDom7.getUTCMinutes()).toBe( 7 );
+            expect( nextDom7.getUTCHours()).toBe( 17 );
+            expect( nextDom7.getUTCDate()).toBe( 7 );
+
+            // Step */7 in minutes
+            const nextStep7 = getNextCronDate( '*/7 * * * *', new Date( '2026-06-01T00:01:00Z' ), 'UTC' );
+            expect( nextStep7.getUTCMinutes()).toBe( 7 );
+
+            // DOW 1-7 and mon-sun ranges, 7L, and 7#2
+            const nextDowRange = getNextCronDate( '0 12 * * 1-7', new Date( '2026-06-06T12:00:00Z' ), 'UTC' );
+            expect( nextDowRange.getUTCDay()).toBe( 0 ); // Sunday June 7
+
+            const nextMonSun = getNextCronDate( '0 12 * * mon-sun', new Date( '2026-06-06T12:00:00Z' ), 'UTC' );
+            expect( nextMonSun.getUTCDay()).toBe( 0 );
+
+            const next7L = getNextCronDate( '0 12 * * 7L', new Date( '2026-06-01T00:00:00Z' ), 'UTC' );
+            expect( next7L.getUTCDay()).toBe( 0 );
+            expect( next7L.getUTCDate()).toBe( 28 );
+
+            const next7Hash2 = getNextCronDate( '0 12 * * 7#2', new Date( '2026-06-01T00:00:00Z' ), 'UTC' );
+            expect( next7Hash2.getUTCDay()).toBe( 0 );
+            expect( next7Hash2.getUTCDate()).toBe( 14 );
+        });
+
+        test( 'should handle 31W on Sunday, LW on weekday, and wildcard items inside comma lists', () =>
+        {
+            // May 31, 2026 is Sunday -> 31W should return Friday May 29
+            const next31W = getNextCronDate( '0 12 31W * *', new Date( '2026-05-01T00:00:00Z' ), 'UTC' );
+            expect( next31W.getUTCDate()).toBe( 29 );
+
+            // June 30, 2026 is Tuesday (weekday) -> LW should return June 30
+            const nextLWWeekday = getNextCronDate( '0 12 LW * *', new Date( '2026-06-01T00:00:00Z' ), 'UTC' );
+            expect( nextLWWeekday.getUTCDate()).toBe( 30 );
+
+            // Wildcard inside comma-separated DOM and DOW lists
+            const nextWildcardList = getNextCronDate( '0 12 *,1 * *,1', new Date( '2026-06-01T00:00:00Z' ), 'UTC' );
+            expect( nextWildcardList.getUTCDate()).toBe( 1 );
+
+            const nextDowWildcardList = getNextCronDate( '0 12 * * *,1', new Date( '2026-06-01T00:00:00Z' ), 'UTC' );
+            expect( nextDowWildcardList.getUTCDate()).toBe( 1 );
+        });
+
+        test( 'should reject invalid cron qualifiers, floats, and malformed tokens', () =>
+        {
+            const baseDate = new Date( '2026-06-01T00:00:00Z' );
+
+            expect(() => getNextCronDate( '1.5-2.5 * * * *', baseDate )).toThrowError( 'Invalid range.' );
+            expect(() => getNextCronDate( '-5 * * * *', baseDate )).toThrowError( 'Invalid range.' );
+            expect(() => getNextCronDate( '5abc * * * *', baseDate )).toThrowError( 'Value out of bounds.' );
+            expect(() => getNextCronDate( '*/5/2 * * * *', baseDate )).toThrowError( 'Invalid step value.' );
+            expect(() => getNextCronDate( '0 12 0W * *', baseDate )).toThrowError( 'Invalid nearest weekday value.' );
+            expect(() => getNextCronDate( '0 12 32W * *', baseDate )).toThrowError( 'Invalid nearest weekday value.' );
+            expect(() => getNextCronDate( '0 12 w * *', baseDate )).toThrowError( 'Invalid nearest weekday value.' );
+            expect(() => getNextCronDate( '0 12 * * 9L', baseDate )).toThrowError( 'Invalid last weekday of month value.' );
+            expect(() => getNextCronDate( '0 12 * * l', baseDate )).toThrowError( 'Invalid last weekday of month value.' );
+            expect(() => getNextCronDate( '0 12 * * 5#0', baseDate )).toThrowError( 'Invalid nth weekday of month value.' );
+            expect(() => getNextCronDate( '0 12 * * 5#6', baseDate )).toThrowError( 'Invalid nth weekday of month value.' );
+            expect(() => getNextCronDate( '0 12 * * 9#2', baseDate )).toThrowError( 'Invalid nth weekday of month value.' );
+            expect(() => getNextCronDate( '0 12 * * 5#1#2', baseDate )).toThrowError( 'Invalid nth weekday of month value.' );
+        });
+
+        test( 'should handle DST spring-forward and fall-back transitions without infinite loops', () =>
+        {
+            // Spring-forward in America/New_York on 2026-03-08 (02:00-02:59 skipped)
+            const springStart = new Date( '2026-03-08T05:00:00Z' ); // 00:00 EST
+            const next3am = getNextCronDate( '0 3 * * *', springStart, 'America/New_York' );
+            expect( next3am.toISOString()).toBe( '2026-03-08T07:00:00.000Z' ); // 03:00 EDT
+
+            // Starting at 01:59 EST right before spring-forward gap
+            const rightBeforeGap = new Date( '2026-03-08T06:59:00Z' );
+            const nextMinuteAcrossGap = getNextCronDate( '* * * * *', rightBeforeGap, 'America/New_York' );
+            expect( nextMinuteAcrossGap.toISOString()).toBe( '2026-03-08T07:00:00.000Z' );
+
+            // Fall-back in America/New_York on 2026-11-01 (01:00-01:59 repeated; second occurrence is 06:00Z-06:59Z)
+            const duringSecondOccurrence = new Date( '2026-11-01T06:10:00Z' ); // 01:10 EST
+            const nextInRepeatedHour = getNextCronDate( '* * * * *', duringSecondOccurrence, 'America/New_York' );
+            expect( nextInRepeatedHour.toISOString()).toBe( '2026-11-01T06:11:00.000Z' );
+        });
+
+        test( 'should evict oldest entries when cronCache and formatters exceed capacity', () =>
+        {
+            const baseDate = new Date( '2026-06-01T00:00:00Z' );
+
+            // Fill and overflow cronCache (> 1000 unique cron expressions)
+            for( let h = 0; h < 20; h++ )
+            {
+                for( let m = 0; m < 55; m++ )
+                {
+                    getNextCronDate( `${m} ${h} * * *`, baseDate );
+                }
+            }
+
+            // Fill and overflow formatters (> 50 unique valid timezones)
+            const zones = Intl.supportedValuesOf( 'timeZone' ).slice( 0, 55 );
+
+            for( const zone of zones )
+            {
+                getNextCronDate( '0 12 * * *', baseDate, zone );
+            }
+
+            expect( getNextCronDate( '0 0 * * *', baseDate, 'UTC' )).toBeInstanceOf( Date );
+        });
+
+        test( 'should stop and remove repeating interval/cron tasks once expires is reached', async () =>
+        {
+            const baseTime = 2000000000000;
+            vi.setSystemTime( baseTime );
+            vi.spyOn( Math, 'random' ).mockReturnValue( 0.5 );
+
+            const timer = new Timer();
+            const cb = vi.fn();
+
+            // Runs at +100ms and +200ms, expires at +250ms (so +300ms should not be scheduled)
+            timer.set( 'expiringInterval', 100, cb,
+                {
+                    interval : 100,
+                    expires  : baseTime + 250
+                });
+
+            vi.advanceTimersByTime( 100 );
+            expect( cb ).toHaveBeenCalledTimes( 1 );
+            expect( timer.has( 'expiringInterval' )).toBe( true );
+
+            vi.advanceTimersByTime( 100 );
+            expect( cb ).toHaveBeenCalledTimes( 2 );
+            expect( timer.has( 'expiringInterval' )).toBe( false );
+
+            // Also verify retry deadline exceeding expires removes the task
+            const failCb = vi.fn(() => Promise.reject( new Error( 'fail' )));
+            timer.set( 'expiringRetry', 100, failCb,
+                {
+                    expires : baseTime + 400,
+                    retry   : { attempts : 3, delay : 200, backoff : 'constant' }
+                });
+
+            vi.advanceTimersByTime( 100 ); // now at baseTime + 300; retry would be at +500 (> +400)
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect( failCb ).toHaveBeenCalledTimes( 1 );
+            expect( timer.has( 'expiringRetry' )).toBe( false );
+
+            timer.destroy();
+        });
+
+        test( 'should maintain correct min-heap ordering when updating tasks while paused', () =>
+        {
+            vi.setSystemTime( 0 );
+
+            const timer = new Timer();
+            const order: string[] = [];
+
+            timer.set( 'a', 100, () => order.push( 'a' ));
+            timer.set( 'b', 200, () => order.push( 'b' ));
+
+            timer.pause();
+            timer.postpone( 'a', 500 );
+            timer.set( 'c', 300, () => order.push( 'c' ));
+            timer.resume();
+
+            vi.advanceTimersByTime( 200 );
+            expect( order ).toEqual([ 'b' ]);
+
+            vi.advanceTimersByTime( 100 );
+            expect( order ).toEqual([ 'b', 'c' ]);
+
+            vi.advanceTimersByTime( 200 );
+            expect( order ).toEqual([ 'b', 'c', 'a' ]);
+
+            timer.destroy();
+        });
+
+        test( 'should handle pausing and resuming an in-flight async task without duplicate executions', async () =>
+        {
+            vi.setSystemTime( 0 );
+
+            const timer = new Timer();
+            let resolveFirst: () => void = () => {};
+            const cb = vi.fn(() => new Promise<void>(( r ) => { resolveFirst = r }));
+
+            timer.set( 'asyncPauseTask', 100, cb, { interval : 100 });
+
+            // 1. Trigger first run at 100ms
+            vi.advanceTimersByTime( 100 );
+            expect( cb ).toHaveBeenCalledTimes( 1 );
+
+            // 2. Pause and immediately resume while still in-flight: must NOT fire a concurrent run
+            expect( timer.pause( 'asyncPauseTask' )).toBe( true );
+            expect( timer.resume( 'asyncPauseTask' )).toBe( true );
+
+            vi.advanceTimersByTime( 50 );
+            expect( cb ).toHaveBeenCalledTimes( 1 );
+
+            // 3. Pause again while still in-flight, then resolve the first run
+            expect( timer.pause( 'asyncPauseTask' )).toBe( true );
+            resolveFirst();
+            await Promise.resolve();
+
+            // Must stay paused even after interval passes
+            vi.advanceTimersByTime( 500 );
+            expect( cb ).toHaveBeenCalledTimes( 1 );
+
+            // 4. Resume after settle -> should schedule and fire once
+            expect( timer.resume( 'asyncPauseTask' )).toBe( true );
+            vi.advanceTimersByTime( 100 );
+            expect( cb ).toHaveBeenCalledTimes( 2 );
+
+            timer.destroy();
+        });
+
+        test( 'should stop dispatching remaining due tasks if a callback pauses the timer', () =>
+        {
+            vi.setSystemTime( 0 );
+
+            const timer = new Timer();
+            const cb2 = vi.fn();
+
+            timer.set( 't1', 100, () => { timer.pause() });
+            timer.set( 't2', 100, cb2 );
+
+            vi.advanceTimersByTime( 100 );
+
+            expect( cb2 ).not.toHaveBeenCalled();
+
+            timer.resume();
+            vi.advanceTimersByTime( 10 );
+
+            expect( cb2 ).toHaveBeenCalledTimes( 1 );
+
+            timer.destroy();
+        });
+
+        test( 'should retry when synchronous callback throws a falsy value and wait for retry delay', () =>
+        {
+            vi.setSystemTime( 0 );
+            vi.spyOn( Math, 'random' ).mockReturnValue( 0.5 );
+
+            const timer = new Timer();
+            const cb = vi.fn(() => { throw '' });
+
+            timer.set( 'falsyThrowTask', 100, cb,
+                {
+                    retry : { attempts : 2, delay : 10, backoff : 'constant' }
+                });
+
+            vi.advanceTimersByTime( 100 );
+            expect( cb ).toHaveBeenCalledTimes( 1 );
+
+            vi.advanceTimersByTime( 10 );
+            expect( cb ).toHaveBeenCalledTimes( 2 );
+
+            vi.advanceTimersByTime( 10 );
+            expect( cb ).toHaveBeenCalledTimes( 3 );
+
+            // Default retry delay (1000ms) when delay is omitted, and retry with attempts omitted
+            const defaultDelayCb = vi.fn(() => { throw new Error( 'fail' ) });
+            timer.set( 'defaultDelayTask', 100, defaultDelayCb, { retry : { attempts : 1 } });
+            timer.set( 'zeroAttemptsTask', 100, defaultDelayCb, { retry : {} });
+
+            vi.advanceTimersByTime( 100 );
+            expect( defaultDelayCb ).toHaveBeenCalledTimes( 2 );
+
+            vi.advanceTimersByTime( 1000 );
+            expect( defaultDelayCb ).toHaveBeenCalledTimes( 3 );
+
+            timer.destroy();
+        });
+
+        test( 'should validate deadlines and safely handle non-positive intervals, offsets, and retry options', () =>
+        {
+            vi.setSystemTime( 0 );
+            vi.spyOn( Math, 'random' ).mockReturnValue( 0.5 );
+
+            const defaultRetry = { attempts : 2, delay : 50, backoff : 'constant' as const };
+            const timer = new Timer({ retry : defaultRetry });
+
+            // Mutating original constructor retry object must not affect timer
+            defaultRetry.attempts = 0;
+
+            expect(() => timer.set( 'bad', NaN, () => {})).toThrowError( 'Invalid deadline.' );
+            expect(() => timer.set( 'bad', new Date( 'invalid' ), () => {})).toThrowError( 'Invalid deadline.' );
+            expect(() => timer.set( 'bad', {} as any, () => {})).toThrowError( 'Invalid deadline.' );
+            expect(() => timer.set( 'bad', null as any, () => {})).toThrowError( 'Invalid deadline.' );
+
+            // Non-positive interval (e.g. 0) and non-finite offset (NaN) are safely treated as one-off / 0 offset without throwing
+            const onceCb = vi.fn();
+            timer.set( 'onceWithZeroInterval', 100, onceCb, { interval : 0, offset : NaN, retry : null });
+            vi.advanceTimersByTime( 100 );
+            expect( onceCb ).toHaveBeenCalledTimes( 1 );
+            expect( timer.has( 'onceWithZeroInterval' )).toBe( false );
+
+            // Set a valid task, pause it, and postpone it with updated retry/timezone options
+            let count = 0;
+            const cb = vi.fn(() =>
+            {
+                count++;
+
+                if( count === 1 ){ throw new Error( 'fail once' ) }
+            });
+
+            timer.set( 'postponeOptsTask', 100, cb );
+            timer.pause( 'postponeOptsTask' );
+
+            expect(() => timer.postpone( 'postponeOptsTask', 200, { timezone : 'Invalid/Zone' })).toThrowError( 'Invalid timezone: Invalid/Zone' );
+
+            expect( timer.postpone( 'postponeOptsTask', 200, { timezone : 'UTC', retry : { attempts : 1, delay : 50 } })).toBe( true );
+            timer.resume( 'postponeOptsTask' );
+
+            vi.advanceTimersByTime( 200 );
+            expect( cb ).toHaveBeenCalledTimes( 1 );
+
+            vi.advanceTimersByTime( 50 );
+            expect( cb ).toHaveBeenCalledTimes( 2 );
+
+            // Postpone with retry: null and when task is currently in-flight
+            let resolveAsync: () => void = () => {};
+            timer.set( 'inFlightPostpone', 100, () => new Promise<void>(( r ) => { resolveAsync = r }));
+            vi.advanceTimersByTime( 100 );
+            expect( timer.postpone( 'inFlightPostpone', 300, { retry : null })).toBe( true );
+            resolveAsync();
+
+            timer.destroy();
+        });
+
+        test( 'should handle cron reschedule error during initial retry calculation', () =>
+        {
+            vi.setSystemTime( 0 );
+            vi.spyOn( Math, 'random' ).mockReturnValue( 0.5 );
+
+            const timer = new Timer();
+            const cb = vi.fn(() => { throw new Error( 'fail' ) });
+
+            shouldMockRescheduleError = false;
+            timer.set( 'cronRetryErrTask', 'trigger-reschedule-error', cb,
+                {
+                    retry : { attempts : 1, delay : 100, backoff : 'constant' }
+                });
+
+            shouldMockRescheduleError = true;
+
+            vi.advanceTimersByTime( 1000 );
+            expect( cb ).toHaveBeenCalledTimes( 1 );
+
+            vi.advanceTimersByTime( 100 );
+            expect( cb ).toHaveBeenCalledTimes( 2 );
+            expect( timer.has( 'cronRetryErrTask' )).toBe( false );
+
+            shouldMockRescheduleError = false;
+            timer.destroy();
         });
     });
 });
