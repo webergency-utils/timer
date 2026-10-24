@@ -1599,6 +1599,17 @@ describe( 'Timer tests', () =>
             const duringSecondOccurrence = new Date( '2026-11-01T06:10:00Z' ); // 01:10 EST
             const nextInRepeatedHour = getNextCronDate( '* * * * *', duringSecondOccurrence, 'America/New_York' );
             expect( nextInRepeatedHour.toISOString()).toBe( '2026-11-01T06:11:00.000Z' );
+
+            // Cron targeting the skipped spring-forward hour (02:00) from 01:30 EST
+            const beforeSkippedHour = new Date( '2026-03-08T06:30:00Z' ); // 01:30 EST
+            const nextSkipped2am = getNextCronDate( '0 2 * * *', beforeSkippedHour, 'America/New_York' );
+            expect( nextSkipped2am.toISOString()).toBe( '2026-03-09T06:00:00.000Z' ); // Next day 02:00 EDT
+
+            // Month wrap-around to next year in both timezone and local modes, and whitespace cache hit
+            const nextJanTz = getNextCronDate( '0 0 1 1 *', new Date( '2026-06-15T00:00:00Z' ), 'UTC' );
+            expect( nextJanTz.toISOString()).toBe( '2027-01-01T00:00:00.000Z' );
+            const nextJanLocal = getNextCronDate( '  0   0 1 1 *  ', new Date( '2026-06-15T00:00:00Z' ));
+            expect( nextJanLocal.getFullYear()).toBe( 2027 );
         });
 
         test( 'should evict oldest entries when cronCache and formatters exceed capacity', () =>

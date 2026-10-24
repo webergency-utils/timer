@@ -1,6 +1,6 @@
 {
   "name": "@webergency-utils/timer",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "type": "module",
   "sideEffects": false,
   "description": "An efficient and robust task scheduling and cron timer library for Node.js supporting custom timezones and retries.",
@@ -48,7 +48,7 @@
   },
   "homepage": "https://github.com/webergency-utils/timer#readme",
   "dependencies": {
-    "@webergency-utils/heap": "^1.0.1"
+    "@webergency-utils/heap": "^1.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -92,12 +92,13 @@ export default class Timer
     {
         return this.#name;
     }
-    #paused          : boolean = false;
-    #timeout         : ReturnType<typeof setTimeout> | undefined;
+    #paused            : boolean = false;
+    #timeout           : ReturnType<typeof setTimeout> | undefined;
+    #scheduledDeadline : number | undefined;
     #index = new Map<string, TimerEntry>();
     #heap = new Heap<TimerEntry, string>(( a, b ) => a.deadline - b.deadline, i => i.id );
-    #defaultTimezone : string | undefined;
-    #defaultRetry    : RetryOptions | undefined;
+    #defaultTimezone   : string | undefined;
+    #defaultRetry      : RetryOptions | undefined;
 
     public constructor( options?: TimerConstructorOptions );
     public constructor( name?: string, options?: TimerConstructorOptions );
@@ -130,16 +131,163 @@ export default class Timer
 
     #schedule()
     {
-        this.#timeout && clearTimeout( this.#timeout );
-
         const top = this.#heap.top();
 
-        this.#timeout = !( this.#paused || globallyPaused ) && top ? setTimeout(() => this.#dispatch(), Math.max( 0, Math.min( 60000, top.deadline - Date.now()))) : undefined;
+        if( this.#paused || globallyPaused || !top )
+        {
+            if( this.#timeout )
+            {
+                clearTimeout( this.#timeout );
+                this.#timeout = undefined;
+                this.#scheduledDeadline = undefined;
+            }
+
+            return;
+        }
+
+        const now = Date.now();
+        const target = Math.max( now, Math.min( now + 60000, top.deadline ));
+
+        if( this.#timeout && this.#scheduledDeadline === target )
+        {
+            return;
+        }
+
+        this.#timeout && clearTimeout( this.#timeout );
+        this.#scheduledDeadline = target;
+        this.#timeout = setTimeout(() => this.#dispatch(), target - now );
+    }
+
+    #reschedule( timer: TimerEntry, startTime: number, startVersion: number, endTime: number, isAsync: boolean, failed: boolean )
+    {
+        const currentTimer = this.#index.get( timer.id );
+
+        if( currentTimer === timer && currentTimer.version === startVersion )
+        {
+            timer.inFlight = false;
+
+            if( failed && timer.retry && ( timer.retry.attempts ?? 0 ) > 0 )
+            {
+                if( !timer.retryAttempt )
+                {
+                    let nextRegular: number | undefined;
+
+                    if( timer.cron )
+                    {
+                        try
+                        {
+                            nextRegular = getNextCronDate( timer.cron, new Date( Math.max( endTime, startTime )), timer.timezone ).getTime();
+                        }
+                        catch( e )
+                        {
+                            // If cron parse fails, we leave nextRegular as undefined
+                        }
+                    }
+                    else if( timer.interval )
+                    {
+                        if( isAsync )
+                        {
+                            nextRegular = endTime + timer.interval;
+                        }
+                        else
+                        {
+                            nextRegular = startTime + Math.ceil( Math.max( 1, ( endTime - startTime ) / timer.interval )) * timer.interval;
+                        }
+                    }
+
+                    timer.nextRegularFiring = nextRegular;
+                }
+
+                const attempt = timer.retryAttempt! + 1;
+
+                if( attempt <= timer.retry.attempts! )
+                {
+                    const rawDelay = timer.retry.delay;
+                    const baseDelay = ( rawDelay !== undefined && Number.isFinite( rawDelay ) && rawDelay >= 0 ) ? rawDelay : 1000;
+                    const multiplier = timer.retry.backoff === 'exponential' ? Math.pow( 2, Math.min( attempt - 1, 30 )) : 1;
+                    const retryDelay = Math.min( MAX_TIMEOUT_MS, baseDelay * multiplier );
+                    const jitter = retryDelay * ( Math.random() * 0.2 - 0.1 );
+                    const retryDeadline = Date.now() + Math.max( 1, Math.round( retryDelay + jitter ));
+
+                    if( timer.nextRegularFiring !== undefined && retryDeadline >= timer.nextRegularFiring )
+                    {
+                        timer.deadline = timer.nextRegularFiring;
+                        timer.retryAttempt = 0;
+                        timer.nextRegularFiring = undefined;
+                    }
+                    else
+                    {
+                        timer.deadline = retryDeadline;
+                        timer.retryAttempt = attempt;
+                    }
+
+                    if( timer.expires !== undefined && timer.deadline > timer.expires )
+                    {
+                        this.#index.delete( timer.id );
+
+                        return;
+                    }
+
+                    !timer.paused && this.#heap.push( timer );
+                    isAsync && this.#schedule();
+
+                    return;
+                }
+            }
+
+            timer.retryAttempt = 0;
+            timer.nextRegularFiring = undefined;
+
+            let nextDeadline: number;
+
+            if( timer.cron )
+            {
+                try
+                {
+                    nextDeadline = getNextCronDate( timer.cron, new Date( Math.max( endTime, startTime )), timer.timezone ).getTime();
+                }
+                catch( e )
+                {
+                    this.#index.delete( timer.id );
+
+                    return;
+                }
+            }
+            else if( timer.interval )
+            {
+                if( isAsync )
+                {
+                    nextDeadline = endTime + timer.interval;
+                }
+                else
+                {
+                    nextDeadline = startTime + Math.ceil( Math.max( 1, ( endTime - startTime ) / timer.interval )) * timer.interval;
+                }
+            }
+            else
+            {
+                this.#index.delete( timer.id );
+
+                return;
+            }
+
+            if( timer.expires !== undefined && nextDeadline > timer.expires )
+            {
+                this.#index.delete( timer.id );
+
+                return;
+            }
+
+            timer.deadline = nextDeadline;
+            !timer.paused && this.#heap.push( timer );
+            isAsync && this.#schedule();
+        }
     }
 
     #dispatch()
     {
         this.#timeout = undefined;
+        this.#scheduledDeadline = undefined;
 
         let top;
         const now = Date.now();
@@ -171,142 +319,16 @@ export default class Timer
                 threwSync = true;
             }
 
-            const handleReschedule = ( endTime: number, isAsync: boolean, failed: boolean ) =>
-            {
-                const currentTimer = this.#index.get( timer.id );
-
-                if( currentTimer === timer && currentTimer.version === startVersion )
-                {
-                    timer.inFlight = false;
-
-                    if( failed && timer.retry && ( timer.retry.attempts ?? 0 ) > 0 )
-                    {
-                        if( !timer.retryAttempt )
-                        {
-                            let nextRegular: number | undefined;
-
-                            if( timer.cron )
-                            {
-                                try
-                                {
-                                    nextRegular = getNextCronDate( timer.cron, new Date( Math.max( endTime, startTime )), timer.timezone ).getTime();
-                                }
-                                catch( e )
-                                {
-                                    // If cron parse fails, we leave nextRegular as undefined
-                                }
-                            }
-                            else if( timer.interval )
-                            {
-                                if( isAsync )
-                                {
-                                    nextRegular = endTime + timer.interval;
-                                }
-                                else
-                                {
-                                    nextRegular = startTime + Math.ceil( Math.max( 1, ( endTime - startTime ) / timer.interval )) * timer.interval;
-                                }
-                            }
-
-                            timer.nextRegularFiring = nextRegular;
-                        }
-
-                        const attempt = timer.retryAttempt! + 1;
-
-                        if( attempt <= timer.retry.attempts! )
-                        {
-                            const rawDelay = timer.retry.delay;
-                            const baseDelay = ( rawDelay !== undefined && Number.isFinite( rawDelay ) && rawDelay >= 0 ) ? rawDelay : 1000;
-                            const multiplier = timer.retry.backoff === 'exponential' ? Math.pow( 2, Math.min( attempt - 1, 30 )) : 1;
-                            const retryDelay = Math.min( MAX_TIMEOUT_MS, baseDelay * multiplier );
-                            const jitter = retryDelay * ( Math.random() * 0.2 - 0.1 );
-                            const retryDeadline = Date.now() + Math.max( 1, Math.round( retryDelay + jitter ));
-
-                            if( timer.nextRegularFiring !== undefined && retryDeadline >= timer.nextRegularFiring )
-                            {
-                                timer.deadline = timer.nextRegularFiring;
-                                timer.retryAttempt = 0;
-                                timer.nextRegularFiring = undefined;
-                            }
-                            else
-                            {
-                                timer.deadline = retryDeadline;
-                                timer.retryAttempt = attempt;
-                            }
-
-                            if( timer.expires !== undefined && timer.deadline > timer.expires )
-                            {
-                                this.#index.delete( timer.id );
-
-                                return;
-                            }
-
-                            !timer.paused && this.#heap.push( timer );
-                            isAsync && this.#schedule();
-
-                            return;
-                        }
-                    }
-
-                    timer.retryAttempt = 0;
-                    timer.nextRegularFiring = undefined;
-
-                    let nextDeadline: number;
-
-                    if( timer.cron )
-                    {
-                        try
-                        {
-                            nextDeadline = getNextCronDate( timer.cron, new Date( Math.max( endTime, startTime )), timer.timezone ).getTime();
-                        }
-                        catch( e )
-                        {
-                            this.#index.delete( timer.id );
-
-                            return;
-                        }
-                    }
-                    else if( timer.interval )
-                    {
-                        if( isAsync )
-                        {
-                            nextDeadline = endTime + timer.interval;
-                        }
-                        else
-                        {
-                            nextDeadline = startTime + Math.ceil( Math.max( 1, ( endTime - startTime ) / timer.interval )) * timer.interval;
-                        }
-                    }
-                    else
-                    {
-                        this.#index.delete( timer.id );
-
-                        return;
-                    }
-
-                    if( timer.expires !== undefined && nextDeadline > timer.expires )
-                    {
-                        this.#index.delete( timer.id );
-
-                        return;
-                    }
-
-                    timer.deadline = nextDeadline;
-                    !timer.paused && this.#heap.push( timer );
-                    isAsync && this.#schedule();
-                }
-            };
-
             if( !threwSync && result && typeof ( result as any ).then === 'function' )
             {
                 ( result as any ).then(
-                    () => handleReschedule( Date.now(), true, false ),
-                    () => handleReschedule( Date.now(), true, true )
+                    () => this.#reschedule( timer, startTime, startVersion, Date.now(), true, false ),
+                    () => this.#reschedule( timer, startTime, startVersion, Date.now(), true, true )
                 );
             }
             else
             {
-                handleReschedule( Date.now(), false, threwSync );
+                this.#reschedule( timer, startTime, startVersion, Date.now(), false, threwSync );
             }
         }
 

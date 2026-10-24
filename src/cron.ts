@@ -1,18 +1,41 @@
-const MONTH_NAMES = [ 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec' ];
-const DAY_NAMES = [ 'sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat' ];
+const MONTH_MAP: Record<string, string> =
+    {
+        jan : '1', feb : '2', mar : '3', apr : '4', may : '5', jun : '6',
+        jul : '7', aug : '8', sep : '9', oct : '10', nov : '11', dec : '12'
+    };
+const DAY_MAP: Record<string, string> =
+    {
+        sun : '0', mon : '1', tue : '2', wed : '3', thu : '4', fri : '5', sat : '6'
+    };
+const MONTH_RE = /jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/g;
+const DAY_RE = /sun|mon|tue|wed|thu|fri|sat/g;
+const ALPHA_RE = /[a-zA-Z]/;
+const SPECIAL_DOM_RE = /[lw]/i;
+const SPECIAL_DOW_RE = /[l#]/i;
+const MULTI_SPACE_RE = /\s+/g;
 const MAX_CRON_CACHE_SIZE = 1000;
 const MAX_FORMATTER_CACHE_SIZE = 50;
 const INT_RE = /^-?\d+$/;
 
 type ParsedCron =
     {
-        minutes         : Set<number>
-        hours           : Set<number>
-        months          : Set<number>
+        nextMinute      : Int8Array
+        nextHour        : Int8Array
+        nextMonth       : Int8Array
         isDOMRestricted : boolean
         isDOWRestricted : boolean
         isDOMMatch      : ( date: Date ) => boolean
         isDOWMatch      : ( date: Date ) => boolean
+    };
+
+type TZParts =
+    {
+        year   : number
+        month  : number
+        day    : number
+        hour   : number
+        minute : number
+        second : number
     };
 
 const cronCache = new Map<string, ParsedCron>();
@@ -22,6 +45,24 @@ const formatters = new Map<string, Intl.DateTimeFormat>();
 function parseStrictInt( str: string ): number
 {
     return INT_RE.test( str ) ? parseInt( str, 10 ) : NaN;
+}
+
+function buildNextLookup( set: Set<number>, size: number, min: number ): Int8Array
+{
+    const table = new Int8Array( size );
+    let next = -1;
+
+    for( let i = size - 1; i >= min; i-- )
+    {
+        if( set.has( i ))
+        {
+            next = i;
+        }
+
+        table[ i ] = next;
+    }
+
+    return table;
 }
 
 function getFormatter( timeZone: string ): Intl.DateTimeFormat
@@ -57,7 +98,7 @@ export function validateTimeZone( timeZone: string )
 {
     try
     {
-        Intl.DateTimeFormat( undefined, { timeZone });
+        getFormatter( timeZone );
     }
     catch
     {
@@ -65,21 +106,33 @@ export function validateTimeZone( timeZone: string )
     }
 }
 
-function getTZParts( date: Date, timeZone: string ): Record<string, number>
+function getTZParts( date: Date, timeZone: string ): TZParts
 {
     const formatter = getFormatter( timeZone );
     const parts = formatter.formatToParts( date );
-    const dict: Record<string, number> = {};
+    let year = 0;
+    let month = 0;
+    let day = 0;
+    let hour = 0;
+    let minute = 0;
+    let second = 0;
 
-    for( const p of parts )
+    for( let i = 0; i < parts.length; i++ )
     {
-        if( p.type !== 'literal' )
+        const p = parts[ i ];
+
+        switch ( p.type )
         {
-            dict[ p.type ] = parseInt( p.value, 10 );
+            case 'year': year = +p.value; break;
+            case 'month': month = +p.value; break;
+            case 'day': day = +p.value; break;
+            case 'hour': hour = +p.value; break;
+            case 'minute': minute = +p.value; break;
+            case 'second': second = +p.value; break;
         }
     }
 
-    return dict;
+    return { year, month, day, hour, minute, second };
 }
 
 function getTZOffset( date: Date, timeZone: string ): number
@@ -92,14 +145,21 @@ function getTZOffset( date: Date, timeZone: string ): number
 
 function createTZDate( year: number, month: number, day: number, hour: number, minute: number, timeZone: string ): Date
 {
-    const utcEstimate = new Date( Date.UTC( year, month - 1, day, hour, minute ));
+    const utcMs = Date.UTC( year, month - 1, day, hour, minute );
+    const utcEstimate = new Date( utcMs );
     const offset = getTZOffset( utcEstimate, timeZone );
-    const result = new Date( utcEstimate.getTime() + offset );
+
+    if( offset === 0 )
+    {
+        return utcEstimate;
+    }
+
+    const result = new Date( utcMs + offset );
     const actualOffset = getTZOffset( result, timeZone );
 
     if( actualOffset !== offset )
     {
-        return new Date( utcEstimate.getTime() + actualOffset );
+        return new Date( utcMs + actualOffset );
     }
 
     return result;
@@ -112,53 +172,24 @@ function stepTZDate( prev: Date, year: number, month: number, day: number, hour:
     return next.getTime() > prev.getTime() ? next : new Date(( Math.floor( prev.getTime() / 60000 ) * 60000 ) + fallbackMs );
 }
 
-type TZDateInfo =
-    {
-        year    : number
-        month   : number
-        day     : number
-        hour    : number
-        minute  : number
-        weekday : number
-    };
-
-function getTZDateInfo( date: Date, timeZone: string ): TZDateInfo
-{
-    const dict = getTZParts( date, timeZone );
-    const weekday = new Date( dict.year, dict.month - 1, dict.day ).getDay();
-
-    return {
-        year    : dict.year,
-        month   : dict.month,
-        day     : dict.day,
-        hour    : dict.hour,
-        minute  : dict.minute,
-        weekday : weekday
-    };
-}
-
 function normalizeMonthField( part: string ): string
 {
-    let p = part.toLowerCase();
-
-    for( let i = 0; i < 12; i++ )
+    if( !ALPHA_RE.test( part ))
     {
-        p = p.replace( new RegExp( MONTH_NAMES[ i ], 'g' ), String( i + 1 ));
+        return part;
     }
 
-    return p;
+    return part.toLowerCase().replace( MONTH_RE, m => MONTH_MAP[ m ]);
 }
 
 function normalizeDOWField( part: string ): string
 {
-    let p = part.toLowerCase().replace( /-sun\b/g, '-7' );
-
-    for( let i = 0; i < 7; i++ )
+    if( !ALPHA_RE.test( part ))
     {
-        p = p.replace( new RegExp( DAY_NAMES[ i ], 'g' ), String( i ));
+        return part;
     }
 
-    return p;
+    return part.toLowerCase().replace( /-sun\b/g, '-7' ).replace( DAY_RE, d => DAY_MAP[ d ]);
 }
 
 function parseCronField( field: string, min: number, max: number ): Set<number>
@@ -294,11 +325,6 @@ function parseDOMItem( item: string ): ( date: Date ) => boolean
 {
     const lower = item.toLowerCase();
 
-    if( lower === '*' || lower === '?' )
-    {
-        return () => true;
-    }
-
     if( lower === 'l' )
     {
         return ( date ) =>
@@ -340,18 +366,19 @@ function parseDOMItem( item: string ): ( date: Date ) => boolean
     }
 
     const values = parseCronField( lower, 1, 31 );
+    let mask = 0;
 
-    return ( date ) => values.has( date.getDate());
+    for( const val of values )
+    {
+        mask |= ( 1 << val );
+    }
+
+    return ( date ) => ( mask & ( 1 << date.getDate())) !== 0;
 }
 
 function parseDOWItem( item: string ): ( date: Date ) => boolean
 {
     const lower = item.toLowerCase();
-
-    if( lower === '*' || lower === '?' )
-    {
-        return () => true;
-    }
 
     if( lower.endsWith( 'l' ))
     {
@@ -398,14 +425,14 @@ function parseDOWItem( item: string ): ( date: Date ) => boolean
     }
 
     const rawValues = parseCronField( lower, 0, 7 );
-    const values = new Set<number>();
+    let mask = 0;
 
     for( const val of rawValues )
     {
-        values.add( val === 7 ? 0 : val );
+        mask |= ( 1 << ( val === 7 ? 0 : val ));
     }
 
-    return ( date ) => values.has( date.getDay());
+    return ( date ) => ( mask & ( 1 << date.getDay())) !== 0;
 }
 
 export function getNextCronDate( cron: string, fromDate: Date = new Date(), timeZone?: string ): Date
@@ -415,98 +442,129 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
         validateTimeZone( timeZone );
     }
 
-    const cacheKey = cron.trim().replace( /\s+/g, ' ' );
-    let parsed = cronCache.get( cacheKey );
+    let parsed = cronCache.get( cron );
 
     if( !parsed )
     {
-        const fields = cacheKey.split( ' ' );
+        const cacheKey = cron.trim().replace( MULTI_SPACE_RE, ' ' );
+        parsed = cronCache.get( cacheKey );
 
-        if( fields.length !== 5 )
+        if( !parsed )
         {
-            throw new Error( 'Invalid cron expression. Only 5-field expressions are supported.' );
-        }
+            const fields = cacheKey.split( ' ' );
 
-        const minutes = parseCronField( fields[ 0 ], 0, 59 );
-        const hours = parseCronField( fields[ 1 ], 0, 23 );
-        const months = parseCronField( normalizeMonthField( fields[ 3 ]), 1, 12 );
-
-        const domParts = fields[ 2 ].split( ',' );
-        const domMatchers = domParts.map( parseDOMItem );
-        const isDOMRestricted = fields[ 2 ] !== '*' && fields[ 2 ] !== '?';
-        const isDOMMatch = ( date: Date ) => domMatchers.some( m => m( date ));
-
-        const dowParts = normalizeDOWField( fields[ 4 ]).split( ',' );
-        const dowMatchers = dowParts.map( parseDOWItem );
-        const isDOWRestricted = fields[ 4 ] !== '*' && fields[ 4 ] !== '?';
-        const isDOWMatch = ( date: Date ) => dowMatchers.some( m => m( date ));
-
-        if( cronCache.size >= MAX_CRON_CACHE_SIZE )
-        {
-            cronCache.delete( cronCache.keys().next().value! );
-        }
-
-        cronCache.set( cacheKey, parsed = { minutes, hours, months, isDOMRestricted, isDOWRestricted, isDOMMatch, isDOWMatch });
-    }
-
-    const { minutes, hours, months, isDOMRestricted, isDOWRestricted, isDOMMatch, isDOWMatch } = parsed;
-
-    if( timeZone )
-    {
-        const infoStart = getTZDateInfo( fromDate, timeZone );
-        let current = stepTZDate( fromDate, infoStart.year, infoStart.month, infoStart.day, infoStart.hour, infoStart.minute + 1, timeZone, 60000 );
-        const limit = new Date( current.getTime());
-        limit.setFullYear( limit.getFullYear() + 5 );
-
-        while( current.getTime() < limit.getTime())
-        {
-            const info = getTZDateInfo( current, timeZone );
-
-            if( !months.has( info.month ))
+            if( fields.length !== 5 )
             {
-                current = createTZDate( info.year, info.month + 1, 1, 0, 0, timeZone );
-
-                continue;
+                throw new Error( 'Invalid cron expression. Only 5-field expressions are supported.' );
             }
 
-            const localEquivalent = new Date( info.year, info.month - 1, info.day, info.hour, info.minute );
+            const minutes = parseCronField( fields[ 0 ], 0, 59 );
+            const hours = parseCronField( fields[ 1 ], 0, 23 );
+            const months = parseCronField( normalizeMonthField( fields[ 3 ]), 1, 12 );
 
-            if( isDOMRestricted && isDOWRestricted )
+            const nextMinute = buildNextLookup( minutes, 60, 0 );
+            const nextHour = buildNextLookup( hours, 24, 0 );
+            const nextMonth = buildNextLookup( months, 13, 1 );
+
+            const domField = fields[ 2 ];
+            const isDOMRestricted = domField !== '*' && domField !== '?';
+            let isDOMMatch: ( date: Date ) => boolean;
+
+            if( SPECIAL_DOM_RE.test( domField ))
             {
-                if( !isDOMMatch( localEquivalent ) && !isDOWMatch( localEquivalent ))
-                {
-                    current = createTZDate( info.year, info.month, info.day + 1, 0, 0, timeZone );
-
-                    continue;
-                }
+                const domMatchers = domField.split( ',' ).map( parseDOMItem );
+                isDOMMatch = ( date: Date ) => domMatchers.some( m => m( date ));
             }
             else
             {
-                if( isDOMRestricted && !isDOMMatch( localEquivalent ))
-                {
-                    current = createTZDate( info.year, info.month, info.day + 1, 0, 0, timeZone );
-
-                    continue;
-                }
-
-                if( isDOWRestricted && !isDOWMatch( localEquivalent ))
-                {
-                    current = createTZDate( info.year, info.month, info.day + 1, 0, 0, timeZone );
-
-                    continue;
-                }
+                isDOMMatch = parseDOMItem( domField );
             }
 
-            if( !hours.has( info.hour ))
+            const normalizedDOW = normalizeDOWField( fields[ 4 ]);
+            const isDOWRestricted = fields[ 4 ] !== '*' && fields[ 4 ] !== '?';
+            let isDOWMatch: ( date: Date ) => boolean;
+
+            if( SPECIAL_DOW_RE.test( normalizedDOW ))
             {
-                current = stepTZDate( current, info.year, info.month, info.day, info.hour + 1, 0, timeZone, ( 60 - info.minute ) * 60000 );
+                const dowMatchers = normalizedDOW.split( ',' ).map( parseDOWItem );
+                isDOWMatch = ( date: Date ) => dowMatchers.some( m => m( date ));
+            }
+            else
+            {
+                isDOWMatch = parseDOWItem( normalizedDOW );
+            }
+
+            if( cronCache.size >= MAX_CRON_CACHE_SIZE )
+            {
+                cronCache.delete( cronCache.keys().next().value! );
+            }
+
+            parsed = { nextMinute, nextHour, nextMonth, isDOMRestricted, isDOWRestricted, isDOMMatch, isDOWMatch };
+            cronCache.set( cacheKey, parsed );
+        }
+    }
+
+    const { nextMinute, nextHour, nextMonth, isDOMRestricted, isDOWRestricted, isDOMMatch, isDOWMatch } = parsed;
+
+    if( timeZone )
+    {
+        let current = new Date(( Math.floor( fromDate.getTime() / 60000 ) + 1 ) * 60000 );
+        const limit = new Date( current.getTime());
+        limit.setFullYear( limit.getFullYear() + 5 );
+        const limitMs = limit.getTime();
+
+        while( current.getTime() < limitMs )
+        {
+            const info = getTZParts( current, timeZone );
+            const nextM = nextMonth[ info.month ];
+
+            if( nextM !== info.month )
+            {
+                current = nextM === -1
+                    ? createTZDate( info.year + 1, 1, 1, 0, 0, timeZone )
+                    : createTZDate( info.year, nextM, 1, 0, 0, timeZone );
 
                 continue;
             }
 
-            if( !minutes.has( info.minute ))
+            if( isDOMRestricted || isDOWRestricted )
             {
-                current = new Date( current.getTime() + 60000 );
+                const localEquivalent = new Date( info.year, info.month - 1, info.day, info.hour, info.minute );
+
+                if( isDOMRestricted && isDOWRestricted )
+                {
+                    if( !isDOMMatch( localEquivalent ) && !isDOWMatch( localEquivalent ))
+                    {
+                        current = createTZDate( info.year, info.month, info.day + 1, 0, 0, timeZone );
+
+                        continue;
+                    }
+                }
+                else if(( isDOMRestricted && !isDOMMatch( localEquivalent )) || ( isDOWRestricted && !isDOWMatch( localEquivalent )))
+                {
+                    current = createTZDate( info.year, info.month, info.day + 1, 0, 0, timeZone );
+
+                    continue;
+                }
+            }
+
+            const nextH = nextHour[ info.hour ];
+
+            if( nextH !== info.hour )
+            {
+                current = nextH === -1
+                    ? createTZDate( info.year, info.month, info.day + 1, 0, 0, timeZone )
+                    : stepTZDate( current, info.year, info.month, info.day, nextH, 0, timeZone, ( 60 - info.minute ) * 60000 );
+
+                continue;
+            }
+
+            const nextMin = nextMinute[ info.minute ];
+
+            if( nextMin !== info.minute )
+            {
+                const delta = nextMin === -1 ? ( 60 - info.minute ) : ( nextMin - info.minute );
+                current = new Date( current.getTime() + ( delta * 60000 ));
 
                 continue;
             }
@@ -519,14 +577,24 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
         const current = new Date(( Math.floor( fromDate.getTime() / 60000 ) + 1 ) * 60000 );
         const limit = new Date( current.getTime());
         limit.setFullYear( limit.getFullYear() + 5 );
+        const limitMs = limit.getTime();
 
-        while( current.getTime() < limit.getTime())
+        while( current.getTime() < limitMs )
         {
             const month = current.getMonth() + 1;
+            const nextM = nextMonth[ month ];
 
-            if( !months.has( month ))
+            if( nextM !== month )
             {
-                current.setMonth( current.getMonth() + 1, 1 );
+                if( nextM === -1 )
+                {
+                    current.setFullYear( current.getFullYear() + 1, 0, 1 );
+                }
+                else
+                {
+                    current.setMonth( nextM - 1, 1 );
+                }
+
                 current.setHours( 0, 0, 0, 0 );
 
                 continue;
@@ -542,39 +610,39 @@ export function getNextCronDate( cron: string, fromDate: Date = new Date(), time
                     continue;
                 }
             }
-            else
+            else if(( isDOMRestricted && !isDOMMatch( current )) || ( isDOWRestricted && !isDOWMatch( current )))
             {
-                if( isDOMRestricted && !isDOMMatch( current ))
-                {
-                    current.setDate( current.getDate() + 1 );
-                    current.setHours( 0, 0, 0, 0 );
+                current.setDate( current.getDate() + 1 );
+                current.setHours( 0, 0, 0, 0 );
 
-                    continue;
-                }
-
-                if( isDOWRestricted && !isDOWMatch( current ))
-                {
-                    current.setDate( current.getDate() + 1 );
-                    current.setHours( 0, 0, 0, 0 );
-
-                    continue;
-                }
+                continue;
             }
 
             const hour = current.getHours();
+            const nextH = nextHour[ hour ];
 
-            if( !hours.has( hour ))
+            if( nextH !== hour )
             {
-                current.setTime( current.getTime() + (( 60 - current.getMinutes()) * 60000 ));
+                if( nextH === -1 )
+                {
+                    current.setDate( current.getDate() + 1 );
+                    current.setHours( 0, 0, 0, 0 );
+                }
+                else
+                {
+                    current.setTime( current.getTime() + (( 60 - current.getMinutes()) * 60000 ));
+                }
 
                 continue;
             }
 
             const minute = current.getMinutes();
+            const nextMin = nextMinute[ minute ];
 
-            if( !minutes.has( minute ))
+            if( nextMin !== minute )
             {
-                current.setTime( current.getTime() + 60000 );
+                const delta = nextMin === -1 ? ( 60 - minute ) : ( nextMin - minute );
+                current.setTime( current.getTime() + ( delta * 60000 ));
 
                 continue;
             }
